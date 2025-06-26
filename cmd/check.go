@@ -3,9 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"mail-reflector/internal/reflector"
-
 	"github.com/spf13/cobra"
+	"mail-reflector/internal/reflector"
 )
 
 var checkCmd = &cobra.Command{
