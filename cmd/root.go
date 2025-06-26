@@ -27,8 +27,7 @@ func init() {
 	// Register subcommands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(checkCmd)
-	// rootCmd.AddCommand(recipientsCmd) // future
-	// rootCmd.AddCommand(serveCmd) // future
+	rootCmd.AddCommand(initCmd)
 }
 
 func Execute() error {
@@ -40,7 +39,16 @@ func initConfig() {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
 	viper.AutomaticEnv()
-	_ = viper.ReadInConfig() // optional config
+
+	err := viper.ReadInConfig()
+	if err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			slog.Warn("No config.yaml found in current directory.",
+				"hint", "Run `mail-reflector init` to create one interactively.")
+		} else {
+			slog.Error("Failed to read config", "error", err)
+		}
+	}
 }
 
 func setupLogger() {

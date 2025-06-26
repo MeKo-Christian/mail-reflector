@@ -3,11 +3,8 @@ package reflector
 import (
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
-	"mime"
-	"strings"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -32,14 +29,14 @@ type MailSummary struct {
 }
 
 // FetchMatchingMails connects to the IMAP server and returns mails matching the configured "from" filter.
-func FetchMatchingMails() ([]MailSummary, error) {
+func FetchMatchingMails() ([]MailSummary, *client.Client, error) {
 	slog.Info("Starting IMAP fetch process")
 
 	// Establish IMAP connection and select INBOX
 	client, err := connectAndLogin()
 	if err != nil {
 		slog.Error("IMAP login failed", "error", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer func() {
@@ -54,12 +51,12 @@ func FetchMatchingMails() ([]MailSummary, error) {
 	messages, err := fetchMatchingMessages(client)
 	if err != nil {
 		slog.Error("Failed to fetch messages", "error", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	slog.Info("Fetched matching messages", "count", len(messages))
 
-	return messages, nil
+	return messages, client, nil
 }
 
 // connectAndLogin establishes a secure connection to the IMAP server,
@@ -93,12 +90,12 @@ func connectAndLogin() (*client.Client, error) {
 	}
 
 	// Select the "INBOX" mailbox in read-only mode (false = not read-only)
-	if _, err := client.Select("INBOX", false); err != nil {
-		_ = client.Logout() // clean up if INBOX selection fails
+	_, err = client.Select("INBOX", false) // false = read-write
+	if err != nil {
+		_ = client.Logout()
 		return nil, fmt.Errorf("failed to select INBOX: %w", err)
 	}
 
-	// Return the logged-in and mailbox-selected IMAP client
 	return client, nil
 }
 
@@ -106,11 +103,15 @@ func connectAndLogin() (*client.Client, error) {
 // fetches basic message data (envelope, UID, body), parses the MIME structure, and returns a list of summaries.
 func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 	// Load the sender filter (e.g., "vorstand@example.com") from config
-	filterFrom := viper.GetString("filter.from")
+	filterFroms := viper.GetStringSlice("filter.from")
 
 	// Create IMAP search criteria to match messages by "From" header
 	criteria := imap.NewSearchCriteria()
-	criteria.Header.Add("From", filterFrom)
+
+	for _, sender := range filterFroms {
+		criteria.Header.Add("From", sender)
+	}
+	criteria.WithoutFlags = []string{imap.SeenFlag}
 
 	// Execute the search query on the selected mailbox (INBOX)
 	uids, err := client.Search(criteria)
@@ -179,81 +180,4 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 	}
 
 	return results, nil
-}
-
-// extractBodies parses a MIME message entity and extracts:
-// - text and HTML body (from multipart/alternative or single-part)
-// - attachments (from multipart/mixed or similar)
-func extractBodies(entity *message.Entity) (string, string, []Attachment) {
-	var text, html string
-	var attachments []Attachment
-
-	// Get content type of the top-level entity (e.g. multipart/mixed)
-	mediaType, _, _ := entity.Header.ContentType()
-
-	// If it's multipart (e.g. mixed or alternative), walk through its parts
-	if strings.HasPrefix(mediaType, "multipart/") {
-		mr := entity.MultipartReader()
-
-		for {
-			part, err := mr.NextPart()
-			if err == io.EOF {
-				break // done reading parts
-			}
-
-			if err != nil {
-				break // skip faulty parts
-			}
-
-			// Get the content type and disposition of this part
-			partMediaType, _, _ := part.Header.ContentType()
-			disposition, _, _ := part.Header.ContentDisposition()
-
-			// Read the body content
-			body, _ := io.ReadAll(part.Body)
-
-			// Handle attachments
-			if disposition == "attachment" {
-				filename := "attachment"
-
-				if cd := part.Header.Get("Content-Disposition"); cd != "" {
-					_, params, err := mime.ParseMediaType(cd)
-
-					if err == nil {
-						if name, ok := params["filename"]; ok {
-							filename = name
-						}
-					}
-				}
-
-				attachments = append(attachments, Attachment{
-					Filename:    filename,
-					ContentType: partMediaType,
-					Data:        body,
-				})
-
-				continue
-			}
-
-			// Handle inline parts (body content)
-			switch partMediaType {
-			case "text/plain":
-				text = string(body)
-			case "text/html":
-				html = string(body)
-			}
-		}
-	} else {
-		// Not multipart: could be just plain text or HTML
-		body, _ := io.ReadAll(entity.Body)
-
-		switch mediaType {
-		case "text/plain":
-			text = string(body)
-		case "text/html":
-			html = string(body)
-		}
-	}
-
-	return text, html, attachments
 }

@@ -8,9 +8,9 @@ import (
 )
 
 func main() {
-	// Use a JSON handler for structured logs (great for cron/systemd)
+	// Use a JSON handler for structured logs
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelError, // Can change to LevelDebug for verbose runs
+		Level: slog.LevelError,
 	})
 
 	// Set this handler as the default for slog
