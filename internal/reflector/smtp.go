@@ -1,18 +1,20 @@
 package reflector
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
 
+	"github.com/emersion/go-imap/client"
 	"github.com/spf13/viper"
 	gomail "gopkg.in/gomail.v2"
 )
 
 // ForwardMail sends a new mail based on a matching input message.
 // It preserves subject, sender info, both plain text and HTML bodies, and includes all attachments.
-func ForwardMail(original MailSummary) error {
+func ForwardMail(client *client.Client, original MailSummary) error {
 	// Load SMTP config and recipient list from config
 	smtpServer := viper.GetString("smtp.server")
 	smtpPort := viper.GetInt("smtp.port")
@@ -71,6 +73,20 @@ func ForwardMail(original MailSummary) error {
 	// Attempt to send the message
 	if err := dialer.DialAndSend(msg); err != nil {
 		return fmt.Errorf("failed to send mail: %w", err)
+	}
+
+	// Save to "Sent" via IMAP
+	if client != nil {
+		var buf bytes.Buffer
+		if _, err := msg.WriteTo(&buf); err != nil {
+			return fmt.Errorf("failed to serialize message: %w", err)
+		}
+
+		if err := saveToSent(client, buf.Bytes()); err != nil {
+			slog.Warn("Could not save to Sent folder", "error", err)
+		} else {
+			slog.Info("Saved mail to Sent folder")
+		}
 	}
 
 	fmt.Printf("Forwarded mail: %s\n", subject)

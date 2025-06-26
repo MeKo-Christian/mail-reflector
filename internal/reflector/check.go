@@ -24,7 +24,7 @@ func CheckAndForward() error {
 	for _, mail := range mails {
 		slog.Info("Forwarding mail", "subject", mail.Envelope.Subject, "uid", mail.UID)
 
-		if err := ForwardMail(mail); err != nil {
+		if err := ForwardMail(client, mail); err != nil {
 			slog.Error("Failed to forward", "uid", mail.UID, "error", err)
 			continue
 		}
