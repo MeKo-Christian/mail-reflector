@@ -1,0 +1,11 @@
+{
+  "release-type": "go",
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "manifest-path": "./",
+      "bump-minor-pre-major": true,
+      "include-v-in-tag": true
+    }
+  }
+}
