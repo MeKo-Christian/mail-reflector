@@ -8,6 +8,8 @@ import (
 )
 
 func TestExtractBodies_TextAndHtml(t *testing.T) {
+	t.Parallel()
+
 	raw := `Content-Type: multipart/alternative; boundary="xyz"
 
 --xyz

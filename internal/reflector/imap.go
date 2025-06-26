@@ -36,26 +36,29 @@ func FetchMatchingMails() ([]MailSummary, error) {
 	slog.Info("Starting IMAP fetch process")
 
 	// Establish IMAP connection and select INBOX
-	c, err := connectAndLogin()
+	client, err := connectAndLogin()
 	if err != nil {
 		slog.Error("IMAP login failed", "error", err)
 		return nil, err
 	}
+
 	defer func() {
-		_ = c.Logout()
+		_ = client.Logout()
+
 		slog.Info("Logged out from IMAP server")
 	}()
 
 	slog.Info("IMAP login successful")
 
 	// Search, fetch and extract all matching messages
-	messages, err := fetchMatchingMessages(c)
+	messages, err := fetchMatchingMessages(client)
 	if err != nil {
 		slog.Error("Failed to fetch messages", "error", err)
 		return nil, err
 	}
 
 	slog.Info("Fetched matching messages", "count", len(messages))
+
 	return messages, nil
 }
 
@@ -78,30 +81,30 @@ func connectAndLogin() (*client.Client, error) {
 	}
 
 	// Dial the IMAP server using TLS
-	c, err := client.DialTLS(address, tlsConfig)
+	client, err := client.DialTLS(address, tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 
 	// Attempt to log in with the provided credentials
-	if err := c.Login(username, password); err != nil {
-		_ = c.Logout() // clean up if login fails
+	if err := client.Login(username, password); err != nil {
+		_ = client.Logout() // clean up if login fails
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
 	// Select the "INBOX" mailbox in read-only mode (false = not read-only)
-	if _, err := c.Select("INBOX", false); err != nil {
-		_ = c.Logout() // clean up if INBOX selection fails
+	if _, err := client.Select("INBOX", false); err != nil {
+		_ = client.Logout() // clean up if INBOX selection fails
 		return nil, fmt.Errorf("failed to select INBOX: %w", err)
 	}
 
 	// Return the logged-in and mailbox-selected IMAP client
-	return c, nil
+	return client, nil
 }
 
 // fetchMatchingMessages searches the INBOX for messages from the configured "filter.from" address,
 // fetches basic message data (envelope, UID, body), parses the MIME structure, and returns a list of summaries.
-func fetchMatchingMessages(c *client.Client) ([]MailSummary, error) {
+func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 	// Load the sender filter (e.g., "vorstand@example.com") from config
 	filterFrom := viper.GetString("filter.from")
 
@@ -110,7 +113,7 @@ func fetchMatchingMessages(c *client.Client) ([]MailSummary, error) {
 	criteria.Header.Add("From", filterFrom)
 
 	// Execute the search query on the selected mailbox (INBOX)
-	uids, err := c.Search(criteria)
+	uids, err := client.Search(criteria)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
@@ -140,7 +143,7 @@ func fetchMatchingMessages(c *client.Client) ([]MailSummary, error) {
 	}
 
 	// Fetch message data from server into the channel
-	if err := c.Fetch(seqset, items, messages); err != nil {
+	if err := client.Fetch(seqset, items, messages); err != nil {
 		return nil, fmt.Errorf("failed to fetch messages: %w", err)
 	}
 
@@ -191,11 +194,13 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 	// If it's multipart (e.g. mixed or alternative), walk through its parts
 	if strings.HasPrefix(mediaType, "multipart/") {
 		mr := entity.MultipartReader()
+
 		for {
 			part, err := mr.NextPart()
 			if err == io.EOF {
 				break // done reading parts
 			}
+
 			if err != nil {
 				break // skip faulty parts
 			}
@@ -210,8 +215,10 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 			// Handle attachments
 			if disposition == "attachment" {
 				filename := "attachment"
+
 				if cd := part.Header.Get("Content-Disposition"); cd != "" {
 					_, params, err := mime.ParseMediaType(cd)
+
 					if err == nil {
 						if name, ok := params["filename"]; ok {
 							filename = name
@@ -224,6 +231,7 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 					ContentType: partMediaType,
 					Data:        body,
 				})
+
 				continue
 			}
 
@@ -238,6 +246,7 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 	} else {
 		// Not multipart: could be just plain text or HTML
 		body, _ := io.ReadAll(entity.Body)
+
 		switch mediaType {
 		case "text/plain":
 			text = string(body)

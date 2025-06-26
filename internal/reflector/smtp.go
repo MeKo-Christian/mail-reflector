@@ -36,6 +36,7 @@ func ForwardMail(original MailSummary) error {
 
 	// Set body (text/plain is required, HTML is optional and added as alternative)
 	msg.SetBody("text/plain", original.TextBody)
+
 	if original.HTMLBody != "" {
 		msg.AddAlternative("text/html", original.HTMLBody)
 	}
