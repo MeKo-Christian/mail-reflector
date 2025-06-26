@@ -2,6 +2,7 @@ package reflector
 
 import (
 	"io"
+	"log/slog"
 	"mime"
 	"strings"
 
@@ -37,7 +38,12 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 			disposition, _, _ := part.Header.ContentDisposition()
 
 			// Read the body content
-			body, _ := io.ReadAll(part.Body)
+			body, err := io.ReadAll(part.Body)
+			if err != nil {
+				slog.Warn("Failed to read part body", "error", err)
+
+				continue
+			}
 
 			// Handle attachments
 			if disposition == "attachment" {
@@ -72,7 +78,11 @@ func extractBodies(entity *message.Entity) (string, string, []Attachment) {
 		}
 	} else {
 		// Not multipart: could be just plain text or HTML
-		body, _ := io.ReadAll(entity.Body)
+		body, err := io.ReadAll(entity.Body)
+		if err != nil {
+			slog.Error("Failed to read body", "error", err)
+			return "", "", attachments
+		}
 
 		switch mediaType {
 		case "text/plain":

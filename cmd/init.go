@@ -68,7 +68,7 @@ recipients:
 			smtpServer, smtpPort, smtpSecurity, smtpUser, smtpPass,
 			yamlList("  - ", froms), yamlList("  - ", recipients))
 
-		if err := os.WriteFile(configFile, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(configFile, []byte(content), 0o600); err != nil {
 			return fmt.Errorf("failed to write config.yaml: %w", err)
 		}
 
