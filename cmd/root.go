@@ -11,7 +11,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "mail-reflector",
 	Short: "Forward filtered mails to a recipient list",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRun: func(_ *cobra.Command, _ []string) {
 		// Setup logger after flag parsing
 		setupLogger()
 	},

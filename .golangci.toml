@@ -26,7 +26,7 @@ linters = ["err113", "goerr113", "wrapcheck"]
 
 [[issues.exclude-rules]]
 # because I'm too lazy to fix it
-path = "cmd/.*\\.go"
+path = "internal/.*\\.go"
 linters = ["gosec", "varnamelen", "forbidigo", "godot"]
 
 [severity]
@@ -48,6 +48,7 @@ disable = [
   "depguard",      # too restrictive
   "ireturn",       # too restrictive
   "exportloopref", # deprecated
+  "gofumpt"        # handled by formatter
 ]
 
 [linters-settings.wsl]

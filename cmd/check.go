@@ -10,7 +10,7 @@ import (
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check mailbox and forward mails if needed",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		if err := reflector.CheckAndForward(); err != nil {
 			fmt.Printf("Check failed: %v\n", err)
 		}
