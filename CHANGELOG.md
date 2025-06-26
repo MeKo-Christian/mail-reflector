@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/MeKo-Christian/mail-reflector/compare/v0.1.1...v0.1.2) (2025-06-26)
+
+
+### Bug Fixes
+
+* linter ([c1923dc](https://github.com/MeKo-Christian/mail-reflector/commit/c1923dc33e03d9b6a0d3ba93f71f73f6719ca9da))
+* release ([#2](https://github.com/MeKo-Christian/mail-reflector/issues/2)) ([20f21d0](https://github.com/MeKo-Christian/mail-reflector/commit/20f21d048660a008804c4b9ea45b5fdee5b27b11))
+
 ## [0.1.1](https://github.com/MeKo-Christian/mail-reflector/compare/v0.1.0...v0.1.1) (2025-06-26)
 
 
