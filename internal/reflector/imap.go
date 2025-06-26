@@ -147,7 +147,7 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 		return nil, fmt.Errorf("failed to fetch messages: %w", err)
 	}
 
-	var results []MailSummary
+	results := make([]MailSummary, 0, len(uids))
 
 	// Process each fetched message
 	for msg := range messages {

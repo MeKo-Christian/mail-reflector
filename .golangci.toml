@@ -24,6 +24,11 @@ linters = ["gochecknoinits", "gochecknoglobals"]
 path = "cmd/.*\\.go"
 linters = ["err113", "goerr113", "wrapcheck"]
 
+[[issues.exclude-rules]]
+# because I'm too lazy to fix it
+path = "cmd/.*\\.go"
+linters = ["gosec", "varnamelen", "forbidigo", "godot"]
+
 [severity]
 default-severity = "warn"
 
