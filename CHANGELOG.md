@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.1.2...v0.2.0) (2025-06-26)
+
+
+### Features
+
+* added mark as seen ([#4](https://github.com/MeKo-Christian/mail-reflector/issues/4)) ([8dabca4](https://github.com/MeKo-Christian/mail-reflector/commit/8dabca4b9ede335dd6d5c1aa8efb52806a56d1f0))
+
 ## [0.1.2](https://github.com/MeKo-Christian/mail-reflector/compare/v0.1.1...v0.1.2) (2025-06-26)
 
 
