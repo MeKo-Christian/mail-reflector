@@ -38,7 +38,7 @@ jobs:
           go build -o dist/mail-reflector-${GOOS}-${GOARCH}${EXT} -ldflags "-X mail-reflector/cmd.Version=$VERSION"
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v1.7.0
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/mail-reflector-*
