@@ -8,7 +8,7 @@ Useful for automated redistribution of announcements (e.g. from a board member t
 
 ## 🚀 Features
 
-- Checks an IMAP inbox for messages from a configured address
+- Checks an IMAP inbox for unread messages from a configured address
 - Forwards matching messages via SMTP
 - Preserves:
   - Subject
@@ -16,9 +16,6 @@ Useful for automated redistribution of announcements (e.g. from a board member t
   - Plain text and HTML bodies
   - Attachments
 - Sends to a list of BCC recipients
-- JSON structured logging (ideal for cron/systemd)
-- CLI built with Cobra and Viper
-- Planned: SQLite tracking of reflected messages, recipient list management, admin UI
 
 ---
 
@@ -32,7 +29,7 @@ go build -o mail-reflector .
 
 ---
 
-# ⚙️ Configuration
+## ⚙️ Configuration
 
 Create a `config.yaml` in the working directory:
 
@@ -45,7 +42,9 @@ imap:
   password: YOUR_IMAP_PASSWORD
 
 filter:
-  from: you@your-provider.com
+  from:
+    - you@your-provider.com
+    - another@your-provider.com
 
 recipients:
   - person1@example.com
