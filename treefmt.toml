@@ -1,0 +1,50 @@
+# run with treefmt --allow-missing-formatter
+
+[global]
+excludes = [
+  # hidden & repo files
+  ".*",
+  "**/.*",
+  # README
+  "**/README.md",
+  "README.md",
+  "CHANGELOG.md",
+  # txt files
+  "**/*.txt",
+  "version.txt",
+  # go.sum
+  "**/go.sum",
+  "go.sum",
+  # go.mod
+  "**/go.mod",
+  "go.mod",
+  # csv/vba files
+  "**/*.csv",
+  "**/*.vba",
+]
+
+### Go
+
+[formatter.gofumpt]
+command = "gofumpt"
+options = ["-w"]
+includes = ["*.go"]
+excludes = ["**/*.gen.go"]
+
+[formatter.gci]
+command = "gci"
+options = ["-w"]
+includes = ["*.go"]
+priority = 1
+
+### Shell
+
+[formatter.shellcheck]
+command = "shellcheck"
+includes = ["*.sh"]
+
+[formatter.shfmt]
+command = "shfmt"
+options = ["-s", "-w"]
+includes = ["*.sh"]
+priority = 1

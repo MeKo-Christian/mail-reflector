@@ -1,0 +1,58 @@
+[issues]
+[[issues.exclude-rules]]
+# no longer a problem in go 1.22
+linters = ["gosec"]
+text = "G601:"
+
+[[issues.exclude-rules]]
+# safe to ignore
+linters = ["errcheck"]
+text = "viper.Bind"
+
+[[issues.exclude-rules]]
+# not a magic number
+linters = ["mnd"]
+source = "cobra.MinimumNArgs"
+
+[[issues.exclude-rules]]
+# idiomatic viper usage
+path = "cmd/.*\\.go"
+linters = ["gochecknoinits", "gochecknoglobals"]
+
+[[issues.exclude-rules]]
+# errors are not consumed
+path = "cmd/.*\\.go"
+linters = ["err113", "goerr113", "wrapcheck"]
+
+[severity]
+default-severity = "warn"
+
+[[severity.rules]]
+# NOTE: these are disabled in the justfile
+linters = ["exhaustruct", "exhaustive", "godox"]
+severity = "info"
+
+[linters]
+# enable all by default and remove those which we do not find useful
+enable-all = true
+disable = [
+  "sqlclosecheck", # broken
+  "musttag",       # broken
+  "gofmt",         # included by gofumpt
+  "nlreturn",      # included by wsl
+  "depguard",      # too restrictive
+  "ireturn",       # too restrictive
+  "exportloopref", # deprecated
+]
+
+[linters-settings.wsl]
+allow-cuddle-declarations = true
+allow-trailing-comment = true
+
+[linters-settings.varnamelen]
+ignore-names = ["rx", "tx", "db", "ok", "mw", "gw", "rt", "id", "mx"]
+ignore-decls = ["w http.ResponseWriter", "r *http.Request", "g *Gateway"]
+
+[linters-settings.tagliatelle.case.rules]
+json = "snake"
+envconfig = "upperSnake"

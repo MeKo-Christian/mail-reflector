@@ -1,0 +1,35 @@
+# .github/workflows/format.yml
+name: Format Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  format:
+    name: Check code formatting via treefmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install required formatters
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          go install github.com/daixiang0/gci@latest
+          sudo apt-get update && sudo apt-get install -y shellcheck shfmt
+
+      - name: Install treefmt
+        run: |
+          curl -fsSL https://github.com/numtide/treefmt/releases/download/v2.1.1/treefmt_2.1.1_linux_amd64.tar.gz | tar -C /usr/local/bin -xz treefmt
+
+      - name: Check formatting
+        run: treefmt --fail-on-change --allow-missing-formatter
