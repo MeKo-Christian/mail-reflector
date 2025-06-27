@@ -36,12 +36,14 @@ func Serve(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			slog.Info("Shutting down IMAP IDLE loop")
+			close(stop)
 			_ = imapClient.Logout()
 			return nil
 		case err := <-done:
 			if err != nil {
 				slog.Error("IDLE terminated with error", "error", err)
 			}
+			close(stop)
 			_ = imapClient.Logout()
 			continue
 		case update := <-updates:
