@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.2.0...v0.3.0) (2025-06-26)
+
+
+### Features
+
+* save sent mail ([#6](https://github.com/MeKo-Christian/mail-reflector/issues/6)) ([a595e52](https://github.com/MeKo-Christian/mail-reflector/commit/a595e52be64208298c1ea483e330351ab984caa9))
+
 ## [0.2.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.1.2...v0.2.0) (2025-06-26)
 
 
