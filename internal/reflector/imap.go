@@ -30,9 +30,6 @@ type MailSummary struct {
 
 // FetchMatchingMails connects to the IMAP server and returns mails matching the configured "from" filter.
 func FetchMatchingMails() ([]MailSummary, *client.Client, error) {
-	slog.Info("Starting IMAP fetch process")
-
-	// Establish IMAP connection and select INBOX
 	client, err := connectAndLogin()
 	if err != nil {
 		slog.Error("IMAP login failed", "error", err)
@@ -45,18 +42,24 @@ func FetchMatchingMails() ([]MailSummary, *client.Client, error) {
 		slog.Info("Logged out from IMAP server")
 	}()
 
-	slog.Info("IMAP login successful")
+	mailSummary, err := FetchMatchingMailsWithClient(client)
 
-	// Search, fetch and extract all matching messages
+	return mailSummary, client, err
+}
+
+// FetchMatchingMailsWithClient uses an existing IMAP client to fetch mails matching the configured "from" filter.
+func FetchMatchingMailsWithClient(client *client.Client) ([]MailSummary, error) {
+	slog.Info("Searching for matching mails")
+
 	messages, err := fetchMatchingMessages(client)
 	if err != nil {
-		slog.Error("Failed to fetch messages", "error", err)
-		return nil, nil, err
+		slog.Error("Failed to fetch matching messages", "error", err)
+		return nil, err
 	}
 
-	slog.Info("Fetched matching messages", "count", len(messages))
+	slog.Info("Fetched messages", "count", len(messages))
 
-	return messages, client, nil
+	return messages, nil
 }
 
 // connectAndLogin establishes a secure connection to the IMAP server,

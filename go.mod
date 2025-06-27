@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-imap-idle v0.0.0-20210907174914-db2568431445
 	github.com/emersion/go-message v0.18.2
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.18.2
