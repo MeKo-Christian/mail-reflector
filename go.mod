@@ -1,4 +1,4 @@
-module mail-reflector
+module github.com/meko-christian/mail-reflector
 
 go 1.23.0
 

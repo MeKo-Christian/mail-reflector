@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"mail-reflector/cmd"
+	"github.com/meko-christian/mail-reflector/cmd"
 )
 
 func main() {

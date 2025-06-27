@@ -9,8 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"mail-reflector/internal/reflector"
-
+	"github.com/meko-christian/mail-reflector/internal/reflector"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
