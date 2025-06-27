@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/meko-christian/mail-reflector/internal/reflector"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"mail-reflector/internal/reflector"
 )
 
 var checkCmd = &cobra.Command{
