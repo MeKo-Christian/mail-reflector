@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.3.0...v0.4.0) (2025-06-29)
+
+
+### Features
+
+* added serve command ([685b693](https://github.com/MeKo-Christian/mail-reflector/commit/685b6938dd8c0e35ebdf533af0440ea91530a12c))
+* added setting to specify subject prefix ([#10](https://github.com/MeKo-Christian/mail-reflector/issues/10)) ([a6c3d66](https://github.com/MeKo-Christian/mail-reflector/commit/a6c3d66191c0025807eff904c7729173b7b34fa5))
+
+
+### Bug Fixes
+
+* close stop channel ([83b1197](https://github.com/MeKo-Christian/mail-reflector/commit/83b119798fa9833abb5ab2aeac0a9f89ebc624b6))
+* ext module name ([94bd793](https://github.com/MeKo-Christian/mail-reflector/commit/94bd7939669037637303b03da0e9b94580d9782e))
+
 ## [0.3.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.2.0...v0.3.0) (2025-06-26)
 
 
