@@ -4,6 +4,17 @@ A CLI tool written in Go that monitors an IMAP inbox for incoming messages from 
 
 Useful for automated redistribution of announcements (e.g. from a board member to a delegate list), with safety, structure, and optional logging.
 
+Compared to a newsletter software, mail-reflector is:
+
+- 🛠️ A simple, robust mail-forwarder for structured communication (e.g., parent councils, boards, workgroups).
+- 🧘 Minimalist: works well if your needs are predictable and narrow.
+
+It's not:
+
+- 📢 A marketing tool.
+- 📈 An analytics or campaign management platform.
+- ✍️ A tool for composing or designing mails.
+
 ---
 
 ## 🚀 Features
