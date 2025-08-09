@@ -20,6 +20,10 @@ const (
 	imapFetchTimeout = 30 * time.Second
 	// imapConnectTimeout defines how long to wait for IMAP connection
 	imapConnectTimeout = 10 * time.Second
+	// imapValidationTimeout defines how long to wait for UID validation
+	imapValidationTimeout = 10 * time.Second
+	// imapSingleMessageTimeout defines how long to wait for individual message fetch
+	imapSingleMessageTimeout = 15 * time.Second
 )
 
 // Attachment represents a file attachment in an email
@@ -180,7 +184,8 @@ func fetchMatchingMessages(ctx context.Context, client *client.Client) ([]MailSu
 
 	slog.Debug("Found unread messages", "count", len(uids))
 
-	// Use two-phase approach to handle problematic UIDs gracefully
+	// Use two-phase approach to handle invalid or stale UIDs gracefully:
+	// UIDs returned by search may be invalid/stale due to concurrent mailbox changes or server inconsistencies
 	// Phase 1: Validate UIDs by fetching just envelopes
 	messages, err := fetchMessagesRobustly(ctx, client, uids, normalizedFilters)
 	if err != nil {
@@ -253,12 +258,12 @@ func validateUIDs(ctx context.Context, client *client.Client, uids []uint32) ([]
 
 	slog.Debug("Validating UIDs", "uids", uids, "seqset", seqset.String())
 
-	// Create a shorter timeout for validation (10 seconds)
-	validationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Create a shorter timeout for validation
+	validationCtx, cancel := context.WithTimeout(ctx, imapValidationTimeout)
 	defer cancel()
 
 	messages := make(chan *imap.Message, len(uids))
-	
+
 	fetchDone := make(chan error, 1)
 	go func() {
 		fetchDone <- client.UidFetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, messages)
@@ -290,8 +295,8 @@ func validateUIDs(ctx context.Context, client *client.Client, uids []uint32) ([]
 func fetchSingleMessage(ctx context.Context, client *client.Client, uid uint32, filters []string) (*MailSummary, bool, error) {
 	slog.Debug("Fetching individual message", "uid", uid)
 
-	// Create timeout for individual message fetch (15 seconds)
-	msgCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Create timeout for individual message fetch
+	msgCtx, cancel := context.WithTimeout(ctx, imapSingleMessageTimeout)
 	defer cancel()
 
 	seqset := new(imap.SeqSet)
