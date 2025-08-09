@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.1](https://github.com/MeKo-Christian/mail-reflector/compare/v0.4.0...v0.4.1) (2025-08-09)
+
+
+### Bug Fixes
+
+* improve error messages and logging for configuration and message… ([#17](https://github.com/MeKo-Christian/mail-reflector/issues/17)) ([4e66ebf](https://github.com/MeKo-Christian/mail-reflector/commit/4e66ebf4d483e9170a7fe188bb8c8b69c17f0d58))
+* modernize code and improve IMAP Sent folder handling ([#21](https://github.com/MeKo-Christian/mail-reflector/issues/21)) ([bc04074](https://github.com/MeKo-Christian/mail-reflector/commit/bc040742a57a224c95d7a52f7a8354ebb9de156c))
+* modernize code and improve IMAP Sent folder handling ([#21](https://github.com/MeKo-Christian/mail-reflector/issues/21)) ([b409dc6](https://github.com/MeKo-Christian/mail-reflector/commit/b409dc6e9ce55ffd7cec32ed6e1e031a92775f55))
+* only log one time ([#15](https://github.com/MeKo-Christian/mail-reflector/issues/15)) ([fdd8513](https://github.com/MeKo-Christian/mail-reflector/commit/fdd8513d8ca3cfaf9f35de46b91fc52edf993948))
+* reply to ([#12](https://github.com/MeKo-Christian/mail-reflector/issues/12)) ([15ebb8a](https://github.com/MeKo-Christian/mail-reflector/commit/15ebb8aa62724fbfdb6eeac67dc364e6169e95c0))
+* resolve IMAP UID fetch timeouts and add recipient logging ([#22](https://github.com/MeKo-Christian/mail-reflector/issues/22)) ([bc04074](https://github.com/MeKo-Christian/mail-reflector/commit/bc040742a57a224c95d7a52f7a8354ebb9de156c))
+* resolve IMAP UID fetch timeouts and add recipient logging ([#22](https://github.com/MeKo-Christian/mail-reflector/issues/22)) ([84017b7](https://github.com/MeKo-Christian/mail-reflector/commit/84017b70ac0a82873048ea4dfbc1ff6ebae0346e))
+* shutdown issue and more logging ([#18](https://github.com/MeKo-Christian/mail-reflector/issues/18)) ([ed0bc07](https://github.com/MeKo-Christian/mail-reflector/commit/ed0bc07b8af94e119070fb17e0a034f437a2b39f))
+* this seems to be working ([bc04074](https://github.com/MeKo-Christian/mail-reflector/commit/bc040742a57a224c95d7a52f7a8354ebb9de156c))
+
 ## [0.4.0](https://github.com/MeKo-Christian/mail-reflector/compare/v0.3.0...v0.4.0) (2025-06-29)
 
 
