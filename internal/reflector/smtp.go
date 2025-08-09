@@ -79,6 +79,7 @@ func ForwardMail(client *client.Client, original MailSummary) error {
 
 	// Attempt to send the message
 	if err := dialer.DialAndSend(msg); err != nil {
+		slog.Error("Failed to send mail", "error", err, "subject", subject, "to", recipients)
 		return fmt.Errorf("failed to send mail: %w", err)
 	}
 
@@ -86,18 +87,24 @@ func ForwardMail(client *client.Client, original MailSummary) error {
 	if client != nil {
 		var buf bytes.Buffer
 		if _, err := msg.WriteTo(&buf); err != nil {
+			slog.Error("Failed to serialize message", "error", err)
 			return fmt.Errorf("failed to serialize message: %w", err)
 		}
 
 		if err := saveToSent(client, buf.Bytes()); err != nil {
-			slog.Warn("Could not save to Sent folder", "error", err)
+			// Handle known server limitation gracefully without spamming warnings
+			if IsSentFolderUnsupported(err) {
+				slog.Debug("Could not save to Sent folder - server doesn't support this feature", "reason", "continuation_request_unsupported")
+			} else {
+				slog.Warn("Could not save to Sent folder", "error", err)
+			}
 		} else {
 			slog.Info("Saved mail to Sent folder")
 		}
 	}
 
 	fmt.Printf("Forwarded mail: %s\n", subject)
-	slog.Info("Forwarded mail", "subject", subject)
+	slog.Info("Forwarded mail", "subject", subject, "recipients", recipients, "recipient_count", len(recipients))
 
 	return nil
 }

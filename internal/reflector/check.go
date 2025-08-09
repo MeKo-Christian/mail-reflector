@@ -3,6 +3,8 @@ package reflector
 import (
 	"fmt"
 	"log/slog"
+
+	"github.com/spf13/viper"
 )
 
 // CheckAndForward checks the IMAP inbox and sends mails if matching messages are found.
@@ -24,7 +26,8 @@ func CheckAndForward() error {
 	}
 
 	for _, mail := range mails {
-		slog.Info("Forwarding mail", "subject", mail.Envelope.Subject, "uid", mail.UID)
+		recipients := viper.GetStringSlice("recipients")
+		slog.Info("Forwarding mail", "subject", mail.Envelope.Subject, "uid", mail.UID, "recipients", recipients, "recipient_count", len(recipients))
 
 		if err := ForwardMail(client, mail); err != nil {
 			slog.Error("Failed to forward", "uid", mail.UID, "error", err)
