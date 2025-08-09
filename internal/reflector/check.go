@@ -14,7 +14,9 @@ func CheckAndForward() error {
 		return err
 	}
 
-	defer client.Logout()
+	defer func() {
+		_ = client.Logout()
+	}()
 
 	if len(mails) == 0 {
 		fmt.Println("No matching mails to forward.")

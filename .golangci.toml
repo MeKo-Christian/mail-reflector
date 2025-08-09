@@ -1,3 +1,5 @@
+version = 2
+
 [issues]
 [[issues.exclude-rules]]
 # no longer a problem in go 1.22
@@ -29,13 +31,6 @@ linters = ["err113", "goerr113", "wrapcheck"]
 path = "internal/.*\\.go"
 linters = ["gosec", "varnamelen", "forbidigo", "godot"]
 
-[severity]
-default-severity = "warn"
-
-[[severity.rules]]
-# NOTE: these are disabled in the justfile
-linters = ["exhaustruct", "exhaustive", "godox"]
-severity = "info"
 
 [linters]
 # enable all by default and remove those which we do not find useful
@@ -43,12 +38,9 @@ enable-all = true
 disable = [
   "sqlclosecheck", # broken
   "musttag",       # broken
-  "gofmt",         # included by gofumpt
   "nlreturn",      # included by wsl
   "depguard",      # too restrictive
-  "ireturn",       # too restrictive
-  "exportloopref", # deprecated
-  "gofumpt"        # handled by formatter
+  "ireturn"        # too restrictive
 ]
 
 [linters-settings.wsl]
