@@ -34,7 +34,10 @@ func Serve(ctx context.Context) error {
 					slog.Error("Error forwarding mail", "error", err)
 					continue
 				}
-				_ = markAsSeen(imapClient, msg.UID)
+				err = markAsSeen(imapClient, msg.UID)
+				if err != nil {
+					slog.Error("Error marking mail as seen", "error", err)
+				}
 			}
 		}
 
@@ -55,6 +58,15 @@ func Serve(ctx context.Context) error {
 		case <-ctx.Done():
 			slog.Info("Shutting down IMAP IDLE loop")
 			close(stop)
+
+			// Wait for IDLE goroutine to finish with timeout
+			select {
+			case <-done:
+				slog.Debug("IDLE goroutine finished cleanly")
+			case <-time.After(5 * time.Second):
+				slog.Warn("IDLE goroutine did not finish within timeout, proceeding with logout")
+			}
+
 			_ = imapClient.Logout()
 			return nil
 		case err := <-done:
@@ -65,9 +77,9 @@ func Serve(ctx context.Context) error {
 			_ = imapClient.Logout()
 			continue
 		case update := <-updates:
-			switch update.(type) {
+			switch u := update.(type) {
 			case *client.MailboxUpdate:
-				slog.Info("New mail detected, running check logic")
+				slog.Info("New mail detected", "exists", u.Mailbox.Messages, "recent", u.Mailbox.Recent)
 
 				messages, err := FetchMatchingMailsWithClient(imapClient)
 				if err != nil {
@@ -75,13 +87,19 @@ func Serve(ctx context.Context) error {
 					break
 				}
 
-				for _, msg := range messages {
-					err := ForwardMail(imapClient, msg)
-					if err != nil {
-						slog.Error("Error forwarding mail", "error", err)
-						continue
+				if len(messages) > 0 {
+					slog.Info("Found matching messages to forward", "count", len(messages))
+					for _, msg := range messages {
+						slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject)
+						err := ForwardMail(imapClient, msg)
+						if err != nil {
+							slog.Error("Error forwarding mail", "error", err)
+							continue
+						}
+						_ = markAsSeen(imapClient, msg.UID)
 					}
-					_ = markAsSeen(imapClient, msg.UID)
+				} else {
+					slog.Info("No matching messages found to forward")
 				}
 			}
 		}

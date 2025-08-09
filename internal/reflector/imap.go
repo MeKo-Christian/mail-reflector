@@ -122,9 +122,14 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 
+	// Check for non-matching unread messages and log them
+	if viper.GetBool("verbose") {
+		logNonMatchingMessages(client, uids)
+	}
+
 	// No messages matched the criteria — return empty result
 	if len(uids) == 0 {
-		log.Println("No matching messages found")
+		slog.Info("No matching messages found")
 		return nil, nil
 	}
 
@@ -183,4 +188,68 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 	}
 
 	return results, nil
+}
+
+// logNonMatchingMessages checks for all unread messages and logs ones that don't match the filter criteria
+func logNonMatchingMessages(client *client.Client, matchingUIDs []uint32) {
+	// Search for ALL unread messages
+	allCriteria := imap.NewSearchCriteria()
+	allCriteria.WithoutFlags = []string{imap.SeenFlag}
+
+	allUIDs, err := client.Search(allCriteria)
+	if err != nil {
+		slog.Debug("Failed to search for all unread messages", "error", err)
+		return
+	}
+
+	// Convert matching UIDs to a set for quick lookup
+	matchingSet := make(map[uint32]bool)
+	for _, uid := range matchingUIDs {
+		matchingSet[uid] = true
+	}
+
+	// Find non-matching messages
+	nonMatchingUIDs := make([]uint32, 0)
+	for _, uid := range allUIDs {
+		if !matchingSet[uid] {
+			nonMatchingUIDs = append(nonMatchingUIDs, uid)
+		}
+	}
+
+	totalUnread := len(allUIDs)
+	matchingCount := len(matchingUIDs)
+	nonMatchingCount := len(nonMatchingUIDs)
+
+	slog.Info("Unread message summary",
+		"total", totalUnread,
+		"matching_filter", matchingCount,
+		"not_matching_filter", nonMatchingCount)
+
+	// Log details about non-matching messages if there are any
+	if nonMatchingCount > 0 && len(nonMatchingUIDs) <= 10 { // Limit to avoid spam
+		// Fetch envelope info for non-matching messages
+		seqset := new(imap.SeqSet)
+		seqset.AddNum(nonMatchingUIDs...)
+
+		messages := make(chan *imap.Message, len(nonMatchingUIDs))
+		if err := client.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, messages); err != nil {
+			slog.Debug("Failed to fetch non-matching message envelopes", "error", err)
+			return
+		}
+
+		slog.Debug("Non-matching unread messages:")
+		for msg := range messages {
+			sender := "unknown"
+			subject := "no subject"
+			if msg.Envelope != nil {
+				if len(msg.Envelope.From) > 0 && msg.Envelope.From[0] != nil {
+					sender = msg.Envelope.From[0].Address()
+				}
+				if msg.Envelope.Subject != "" {
+					subject = msg.Envelope.Subject
+				}
+			}
+			slog.Debug("Non-matching message", "uid", msg.Uid, "from", sender, "subject", subject)
+		}
+	}
 }

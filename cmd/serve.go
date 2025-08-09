@@ -19,7 +19,16 @@ var serveCmd = &cobra.Command{
 	Short: "Continuously watch mailbox and forward matching mails",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !viper.InConfig("imap") || !viper.InConfig("smtp") {
-			return fmt.Errorf("config.yaml is missing or incomplete. Run `mail-reflector init`")
+			return fmt.Errorf(`configuration missing or incomplete.
+
+Create a config.yaml file by running:
+  mail-reflector init
+
+The configuration file should be in your current directory and contain:
+- IMAP server settings (to read emails)
+- SMTP server settings (to forward emails)
+- Email filter rules (which senders to monitor)
+- Recipients list (who receives forwarded emails)`)
 		}
 
 		slog.Info("Starting serve mode (watching mailbox)")
