@@ -73,6 +73,7 @@ func (ic *imapConn) startIdle() error {
 	go func() {
 		defer ic.idleWG.Done()
 		// IdleWithFallback returns when stop is closed or server doesn't support IDLE
+		// 0 timeout means no automatic timeout - IDLE continues until stop channel is closed
 		err := ic.idler.IdleWithFallback(ic.idleStop, 0)
 		if err != nil {
 			slog.Debug("IDLE finished with error", "error", err)
@@ -379,7 +380,11 @@ func connectAndLogin() (*client.Client, error) {
 	}
 
 	// Set read/write timeouts on the connection to prevent hanging
-	tcpConn := conn.(*net.TCPConn)
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		_ = conn.Close()
+		return nil, fmt.Errorf("connection is not a TCP connection")
+	}
 	if err := tcpConn.SetReadBuffer(64 * 1024); err != nil { // 64KB buffer
 		slog.Debug("Failed to set read buffer", "error", err)
 	}
