@@ -82,7 +82,7 @@ Show version:
 
 ---
 
-## 📅 Recommended Usage with Cron
+## Usage with Cron
 
 Example cron entry to check every 10 minutes:
 
@@ -93,6 +93,33 @@ Example cron entry to check every 10 minutes:
 Systemd users may prefer a timer + service unit with StandardOutput=journal.
 
 ---
+
+## Running as a service
+
+You can run this tool as a systemd service for continuous background operation. Here’s an example systemd service file:
+
+```plain
+[Unit]
+Description=Mail Reflector Service
+After=network.target
+
+[Service]
+ExecStart=/path/to/mail-reflector
+WorkingDirectory=/path/to
+Restart=always
+User=<your-user>
+Group=<your-group>
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Place this file at `/etc/systemd/system/mail-reflector.service` and enable it with:
+
+```bash
+sudo systemctl enable mail-reflector
+sudo systemctl start mail-reflector
+```
 
 ## 📄 License
 
