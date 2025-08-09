@@ -24,9 +24,10 @@ func ForwardMail(client *client.Client, original MailSummary) error {
 	recipients := viper.GetStringSlice("recipients")
 	subjectPrefix := viper.GetString("subject.prefix")
 
-	// Set From to the SMTP identity, and To/Reply-To to the original sender
+	// Set From to the SMTP identity, and To to the original sender
 	from := smtpUser
-	to := []string{original.Envelope.From[0].Address()}
+	to := original.Envelope.From[0].Address()
+	reply := original.Envelope.From[0].Address()
 	var subject string
 	if subjectPrefix != "" {
 		subject = fmt.Sprintf("%s %s", subjectPrefix, original.Envelope.Subject)
@@ -37,8 +38,8 @@ func ForwardMail(client *client.Client, original MailSummary) error {
 	// Compose the outgoing message
 	msg := gomail.NewMessage()
 	msg.SetHeader("From", from)
-	msg.SetHeader("To", to...)
-	msg.SetHeader("Reply-To", to...)
+	msg.SetHeader("To", to)
+	msg.SetHeader("Reply-To", reply)
 	msg.SetHeader("Bcc", recipients...)
 	msg.SetHeader("Subject", subject)
 

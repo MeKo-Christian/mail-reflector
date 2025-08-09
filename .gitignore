@@ -1,2 +1,55 @@
-.trunk
+# Build output
+mail-reflector
+mail-reflector.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+*.prof
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Configuration files (may contain sensitive data)
 config.yaml
+config.yml
+*.env
+.env*
+
+# Log files
+*.log
+
+# Development tools
+.trunk/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
