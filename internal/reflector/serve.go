@@ -8,6 +8,7 @@ import (
 
 	idle "github.com/emersion/go-imap-idle"
 	"github.com/emersion/go-imap/client"
+	"github.com/spf13/viper"
 )
 
 const (
@@ -131,7 +132,8 @@ func processMessages(imapClient *client.Client, context string) error {
 
 	for _, msg := range messages {
 		if len(msg.Envelope.From) > 0 {
-			slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject)
+			recipients := viper.GetStringSlice("recipients")
+			slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject, "recipients", recipients, "recipient_count", len(recipients))
 		}
 
 		if err := ForwardMail(imapClient, msg); err != nil {
