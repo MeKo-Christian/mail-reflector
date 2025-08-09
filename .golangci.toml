@@ -1,56 +1,34 @@
 version = "2"
 
-[issues]
-[[issues.exclude_rules]]
-# no longer a problem in go 1.22
-linters = ["gosec"]
-text = "G601:"
+[run]
+timeout = "5m"
+tests = true
 
-[[issues.exclude_rules]]
-# safe to ignore
+[linters]
+default = "standard"
+enable = [
+  "misspell",
+  "gocritic"
+]
+disable = [
+  "depguard"  # too restrictive for small projects
+]
+
+[linters.exclusions]
+generated = "strict"
+
+[[linters.exclusions.rules]]
+# safe to ignore in initialization code
 linters = ["errcheck"]
 text = "viper.Bind"
 
-[[issues.exclude_rules]]
-# not a magic number
-linters = ["mnd"]
-source = "cobra.MinimumNArgs"
-
-[[issues.exclude_rules]]
+[[linters.exclusions.rules]]
 # idiomatic viper usage
 path = "cmd/.*\\.go"
 linters = ["gochecknoinits", "gochecknoglobals"]
 
-[[issues.exclude_rules]]
-# errors are not consumed
-path = "cmd/.*\\.go"
-linters = ["err113", "goerr113", "wrapcheck"]
+[linters.settings]
 
-[[issues.exclude_rules]]
-# because I'm too lazy to fix it
-path = "internal/.*\\.go"
-linters = ["gosec", "varnamelen", "forbidigo", "godot"]
-
-
-[linters]
-# enable all by default and remove those which we do not find useful
-enable_all = true
-disable = [
-  "sqlclosecheck", # broken
-  "musttag",       # broken
-  "nlreturn",      # included by wsl
-  "depguard",      # too restrictive
-  "ireturn"        # too restrictive
-]
-
-[linters_settings.wsl]
-allow-cuddle-declarations = true
-allow-trailing-comment = true
-
-[linters_settings.varnamelen]
-ignore-names = ["rx", "tx", "db", "ok", "mw", "gw", "rt", "id", "mx"]
-ignore-decls = ["w http.ResponseWriter", "r *http.Request", "g *Gateway"]
-
-[linters_settings.tagliatelle.case.rules]
-json = "snake"
-envconfig = "upperSnake"
+[linters.settings.gocritic]
+enabled-tags = ["diagnostic", "style", "performance"]
+disabled-checks = ["commentedOutCode", "unnamedResult", "importShadow"]
