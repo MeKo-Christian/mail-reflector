@@ -1,16 +1,25 @@
 package reflector
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message"
 	"github.com/spf13/viper"
+)
+
+const (
+	// imapFetchTimeout defines how long to wait for IMAP fetch operations
+	imapFetchTimeout = 30 * time.Second
+	// imapConnectTimeout defines how long to wait for IMAP connection
+	imapConnectTimeout = 10 * time.Second
 )
 
 // Attachment represents a file attachment in an email
@@ -52,7 +61,11 @@ func FetchMatchingMails() ([]MailSummary, *client.Client, error) {
 func FetchMatchingMailsWithClient(client *client.Client) ([]MailSummary, error) {
 	slog.Info("Searching for matching mails")
 
-	messages, err := fetchMatchingMessages(client)
+	// Create context with timeout for fetch operations
+	ctx, cancel := context.WithTimeout(context.Background(), imapFetchTimeout)
+	defer cancel()
+
+	messages, err := fetchMatchingMessages(ctx, client)
 	if err != nil {
 		slog.Error("Failed to fetch matching messages", "error", err)
 		return nil, err
@@ -67,6 +80,11 @@ func FetchMatchingMailsWithClient(client *client.Client) ([]MailSummary, error) 
 // logs in using the configured credentials, and selects the INBOX.
 // Returns an authenticated IMAP client, or an error if connection or login fails.
 func connectAndLogin() (*client.Client, error) {
+	return connectAndLoginWithTimeout(imapConnectTimeout)
+}
+
+// connectAndLoginWithTimeout establishes a secure connection with specified timeout
+func connectAndLoginWithTimeout(timeout time.Duration) (*client.Client, error) {
 	// Load connection parameters from config
 	server := viper.GetString("imap.server")
 	port := viper.GetInt("imap.port")
@@ -81,31 +99,57 @@ func connectAndLogin() (*client.Client, error) {
 		ServerName: server, // ensures correct certificate validation
 	}
 
-	// Dial the IMAP server using TLS
-	client, err := client.DialTLS(address, tlsConfig)
-	if err != nil {
+	// Create context with timeout for connection
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Dial the IMAP server using TLS with timeout protection
+	connectionDone := make(chan *client.Client, 1)
+	connectionErr := make(chan error, 1)
+	go func() {
+		client, err := client.DialTLS(address, tlsConfig)
+		if err != nil {
+			connectionErr <- err
+			return
+		}
+		connectionDone <- client
+	}()
+
+	var imapClient *client.Client
+	select {
+	case imapClient = <-connectionDone:
+		// Connection successful
+	case err := <-connectionErr:
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
+	case <-ctx.Done():
+		return nil, fmt.Errorf("connection timed out after %v: %w", timeout, ctx.Err())
+	}
+
+	// Check connection health before proceeding
+	if err := checkConnectionHealth(imapClient); err != nil {
+		_ = imapClient.Logout()
+		return nil, fmt.Errorf("connection health check failed: %w", err)
 	}
 
 	// Attempt to log in with the provided credentials
-	if err := client.Login(username, password); err != nil {
-		_ = client.Logout() // clean up if login fails
+	if err := imapClient.Login(username, password); err != nil {
+		_ = imapClient.Logout() // clean up if login fails
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
 	// Select the "INBOX" mailbox in read-only mode (false = not read-only)
-	_, err = client.Select("INBOX", false) // false = read-write
+	_, err := imapClient.Select("INBOX", false) // false = read-write
 	if err != nil {
-		_ = client.Logout()
+		_ = imapClient.Logout()
 		return nil, fmt.Errorf("failed to select INBOX: %w", err)
 	}
 
-	return client, nil
+	return imapClient, nil
 }
 
 // fetchMatchingMessages searches the INBOX for messages from the configured "filter.from" address,
 // fetches basic message data (envelope, UID, body), parses the MIME structure, and returns a list of summaries.
-func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
+func fetchMatchingMessages(ctx context.Context, client *client.Client) ([]MailSummary, error) {
 	// Load the sender filter (e.g., "vorstand@example.com") from config
 	filterFroms := viper.GetStringSlice("filter.from")
 
@@ -143,6 +187,13 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 
 	slog.Debug("Fetching all unread messages with full data", "uids", uids, "count", len(uids))
 
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("fetch operation cancelled: %w", ctx.Err())
+	default:
+	}
+
 	// Prepare message channel to receive all fetched messages
 	allMessages := make(chan *imap.Message, len(uids))
 
@@ -157,10 +208,22 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 		section.FetchItem(),
 	}
 
-	// Fetch all unread message data from server into the channel
-	if err := client.Fetch(seqset, items, allMessages); err != nil {
-		slog.Error("IMAP fetch failed", "error", err, "uids", uids, "seqset", seqset.String())
-		return nil, fmt.Errorf("failed to fetch messages: %w", err)
+	// Fetch all unread message data from server with timeout protection
+	fetchDone := make(chan error, 1)
+	go func() {
+		fetchDone <- client.Fetch(seqset, items, allMessages)
+	}()
+
+	// Wait for fetch to complete or timeout
+	select {
+	case err := <-fetchDone:
+		if err != nil {
+			slog.Error("IMAP fetch failed", "error", err, "uids", uids, "seqset", seqset.String())
+			return nil, fmt.Errorf("failed to fetch messages: %w", err)
+		}
+	case <-ctx.Done():
+		slog.Error("IMAP fetch timed out", "timeout", imapFetchTimeout, "uids", uids)
+		return nil, fmt.Errorf("fetch operation timed out after %v: %w", imapFetchTimeout, ctx.Err())
 	}
 
 	slog.Debug("Successfully fetched all messages, filtering and processing")
@@ -170,50 +233,62 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 	nonMatchingUIDs := make([]uint32, 0, len(uids))
 	processedCount := 0
 
-	// Process and filter messages simultaneously
-	for msg := range allMessages {
-		processedCount++
-		slog.Debug("Processing message", "uid", msg.Uid, "processed_count", processedCount, "expected_total", len(uids))
+	// Process and filter messages simultaneously with timeout protection
+	for {
+		select {
+		case msg, ok := <-allMessages:
+			if !ok {
+				// Channel closed, we're done
+				goto processingComplete
+			}
+			processedCount++
+			slog.Debug("Processing message", "uid", msg.Uid, "processed_count", processedCount, "expected_total", len(uids))
 
-		// Check if this message matches our filter criteria
-		if !isFromAddressMatching(msg.Envelope, normalizedFilters) {
-			nonMatchingUIDs = append(nonMatchingUIDs, msg.Uid)
-			slog.Debug("Message does not match filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
-			continue
+			// Check if this message matches our filter criteria
+			if !isFromAddressMatching(msg.Envelope, normalizedFilters) {
+				nonMatchingUIDs = append(nonMatchingUIDs, msg.Uid)
+				slog.Debug("Message does not match filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
+				continue
+			}
+
+			// Message matches - add to matching list and process
+			matchingUIDs = append(matchingUIDs, msg.Uid)
+			slog.Debug("Message matches filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
+
+			// Retrieve the raw message body from the fetched section
+			body := msg.GetBody(section)
+			if body == nil {
+				slog.Warn("No body found in matching message", "uid", msg.Uid)
+				continue
+			}
+
+			// Parse the MIME structure of the message using go-message
+			entity, err := message.Read(body)
+			if err != nil {
+				slog.Error("Failed to parse MIME message", "uid", msg.Uid, "error", err)
+				continue
+			}
+
+			// Extract plain text, HTML body, and attachments
+			text, html, attachments := extractBodies(entity)
+
+			// Add the parsed message data to the result list
+			results = append(results, MailSummary{
+				Envelope:    msg.Envelope,
+				UID:         msg.Uid,
+				TextBody:    text,
+				HTMLBody:    html,
+				Attachments: attachments,
+			})
+
+			slog.Debug("Successfully processed matching message", "uid", msg.Uid)
+		case <-ctx.Done():
+			slog.Error("Message processing timed out", "processed", processedCount, "expected", len(uids))
+			return nil, fmt.Errorf("message processing timed out: %w", ctx.Err())
 		}
-
-		// Message matches - add to matching list and process
-		matchingUIDs = append(matchingUIDs, msg.Uid)
-		slog.Debug("Message matches filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
-
-		// Retrieve the raw message body from the fetched section
-		body := msg.GetBody(section)
-		if body == nil {
-			slog.Warn("No body found in matching message", "uid", msg.Uid)
-			continue
-		}
-
-		// Parse the MIME structure of the message using go-message
-		entity, err := message.Read(body)
-		if err != nil {
-			slog.Error("Failed to parse MIME message", "uid", msg.Uid, "error", err)
-			continue
-		}
-
-		// Extract plain text, HTML body, and attachments
-		text, html, attachments := extractBodies(entity)
-
-		// Add the parsed message data to the result list
-		results = append(results, MailSummary{
-			Envelope:    msg.Envelope,
-			UID:         msg.Uid,
-			TextBody:    text,
-			HTMLBody:    html,
-			Attachments: attachments,
-		})
-
-		slog.Debug("Successfully processed matching message", "uid", msg.Uid)
 	}
+
+processingComplete:
 
 	// Log summary of matching vs non-matching messages
 	if viper.GetBool("verbose") {
@@ -314,4 +389,14 @@ func logFilteringSummary(client *client.Client, matchingUIDs, nonMatchingUIDs []
 	if len(nonMatchingUIDs) > 0 && len(nonMatchingUIDs) <= 10 {
 		logNonMatchingMessages(client, nonMatchingUIDs)
 	}
+}
+
+// checkConnectionHealth performs a basic health check on the IMAP connection
+func checkConnectionHealth(client *client.Client) error {
+	// Try to get server capability to ensure connection is working
+	_, err := client.Capability()
+	if err != nil {
+		return fmt.Errorf("capability check failed: %w", err)
+	}
+	return nil
 }
