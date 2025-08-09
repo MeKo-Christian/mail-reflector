@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   format:
     name: Check code formatting via treefmt
@@ -29,7 +32,7 @@ jobs:
 
       - name: Install treefmt
         run: |
-          curl -fsSL https://github.com/numtide/treefmt/releases/download/v2.1.1/treefmt_2.1.1_linux_amd64.tar.gz | tar -C /usr/local/bin -xz treefmt
+          curl -fsSL https://github.com/numtide/treefmt/releases/download/v2.3.1/treefmt_2.3.1_linux_amd64.tar.gz | tar -C /usr/local/bin -xz treefmt
 
       - name: Check formatting
         run: treefmt --fail-on-change --allow-missing-formatter
