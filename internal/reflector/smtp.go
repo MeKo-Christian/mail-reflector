@@ -97,7 +97,7 @@ func ForwardMail(client *client.Client, original MailSummary) error {
 	}
 
 	fmt.Printf("Forwarded mail: %s\n", subject)
-	slog.Info("Forwarded mail", "subject", subject)
+	slog.Info("Forwarded mail", "subject", subject, "recipients", recipients, "recipient_count", len(recipients))
 
 	return nil
 }

@@ -47,6 +47,7 @@ config.yml
 *.log
 
 # Development tools
+.claude/
 .trunk/
 
 # Temporary files

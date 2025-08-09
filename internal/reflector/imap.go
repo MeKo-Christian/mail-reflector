@@ -20,6 +20,10 @@ const (
 	imapFetchTimeout = 30 * time.Second
 	// imapConnectTimeout defines how long to wait for IMAP connection
 	imapConnectTimeout = 10 * time.Second
+	// imapValidationTimeout defines how long to wait for UID validation
+	imapValidationTimeout = 10 * time.Second
+	// imapSingleMessageTimeout defines how long to wait for individual message fetch
+	imapSingleMessageTimeout = 15 * time.Second
 )
 
 // Attachment represents a file attachment in an email
@@ -180,27 +184,124 @@ func fetchMatchingMessages(ctx context.Context, client *client.Client) ([]MailSu
 
 	slog.Debug("Found unread messages", "count", len(uids))
 
-	// Fetch all unread messages with envelopes and bodies in one go
-	// This approach avoids UID invalidation issues between separate fetches
+	// Use two-phase approach to handle invalid or stale UIDs gracefully:
+	// UIDs returned by search may be invalid/stale due to concurrent mailbox changes or server inconsistencies
+	// Phase 1: Validate UIDs by fetching just envelopes
+	messages, err := fetchMessagesRobustly(ctx, client, uids, normalizedFilters)
+	if err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+// fetchMessagesRobustly implements a two-phase fetch approach to handle problematic UIDs
+func fetchMessagesRobustly(ctx context.Context, client *client.Client, uids []uint32, filters []string) ([]MailSummary, error) {
+	slog.Debug("Starting robust message fetch", "uids", uids, "count", len(uids))
+
+	// Phase 1: Validate all UIDs by fetching just envelopes
+	validUIDs, err := validateUIDs(ctx, client, uids)
+	if err != nil {
+		slog.Error("UID validation failed", "error", err)
+		return nil, fmt.Errorf("UID validation failed: %w", err)
+	}
+
+	if len(validUIDs) == 0 {
+		slog.Info("No valid UIDs found")
+		return nil, nil
+	}
+
+	slog.Debug("UID validation complete", "valid_uids", validUIDs, "valid_count", len(validUIDs), "original_count", len(uids))
+
+	// Phase 2: Fetch message bodies one by one for valid UIDs
+	results := make([]MailSummary, 0, len(validUIDs))
+	matchingUIDs := make([]uint32, 0, len(validUIDs))
+	nonMatchingUIDs := make([]uint32, 0, len(validUIDs))
+
+	for _, uid := range validUIDs {
+		select {
+		case <-ctx.Done():
+			slog.Error("Message processing cancelled", "processed", len(results), "remaining", len(validUIDs)-len(results))
+			return nil, fmt.Errorf("message processing cancelled: %w", ctx.Err())
+		default:
+		}
+
+		mailSummary, matches, err := fetchSingleMessage(ctx, client, uid, filters)
+		if err != nil {
+			slog.Warn("Failed to fetch individual message, skipping", "uid", uid, "error", err)
+			continue
+		}
+
+		if matches {
+			matchingUIDs = append(matchingUIDs, uid)
+			results = append(results, *mailSummary)
+			slog.Debug("Successfully processed matching message", "uid", uid)
+		} else {
+			nonMatchingUIDs = append(nonMatchingUIDs, uid)
+		}
+	}
+
+	// Log summary of results
+	if viper.GetBool("verbose") {
+		logFilteringSummary(client, matchingUIDs, nonMatchingUIDs, filters)
+	}
+
+	slog.Debug("Robust fetch complete", "total_results", len(results), "matching", len(matchingUIDs), "non_matching", len(nonMatchingUIDs))
+
+	return results, nil
+}
+
+// validateUIDs checks if UIDs are valid by fetching just envelope data
+func validateUIDs(ctx context.Context, client *client.Client, uids []uint32) ([]uint32, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(uids...)
 
-	slog.Debug("Fetching all unread messages with full data", "uids", uids, "count", len(uids))
+	slog.Debug("Validating UIDs", "uids", uids, "seqset", seqset.String())
 
-	// Check if context is already cancelled
+	// Create a shorter timeout for validation
+	validationCtx, cancel := context.WithTimeout(ctx, imapValidationTimeout)
+	defer cancel()
+
+	messages := make(chan *imap.Message, len(uids))
+
+	fetchDone := make(chan error, 1)
+	go func() {
+		fetchDone <- client.UidFetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, messages)
+	}()
+
 	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("fetch operation cancelled: %w", ctx.Err())
-	default:
+	case err := <-fetchDone:
+		if err != nil {
+			slog.Error("UID validation fetch failed", "error", err, "uids", uids)
+			return nil, fmt.Errorf("UID validation fetch failed: %w", err)
+		}
+	case <-validationCtx.Done():
+		slog.Error("UID validation timed out", "uids", uids)
+		return nil, fmt.Errorf("UID validation timed out: %w", validationCtx.Err())
 	}
 
-	// Prepare message channel to receive all fetched messages
-	allMessages := make(chan *imap.Message, len(uids))
+	validUIDs := make([]uint32, 0, len(uids))
+	for msg := range messages {
+		if msg != nil && msg.Uid > 0 {
+			validUIDs = append(validUIDs, msg.Uid)
+		}
+	}
 
-	// Define which parts of the message to fetch:
-	// - Envelope: contains subject, sender, recipient, date, etc.
-	// - UID: unique ID per message
-	// - BodySectionName{}: represents the entire message body
+	slog.Debug("UID validation complete", "requested", len(uids), "valid", len(validUIDs))
+	return validUIDs, nil
+}
+
+// fetchSingleMessage fetches a single message with full body and checks if it matches filters
+func fetchSingleMessage(ctx context.Context, client *client.Client, uid uint32, filters []string) (*MailSummary, bool, error) {
+	slog.Debug("Fetching individual message", "uid", uid)
+
+	// Create timeout for individual message fetch
+	msgCtx, cancel := context.WithTimeout(ctx, imapSingleMessageTimeout)
+	defer cancel()
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
 	section := &imap.BodySectionName{}
 	items := []imap.FetchItem{
 		imap.FetchEnvelope,
@@ -208,112 +309,56 @@ func fetchMatchingMessages(ctx context.Context, client *client.Client) ([]MailSu
 		section.FetchItem(),
 	}
 
-	// Fetch all unread message data from server with timeout protection
+	messages := make(chan *imap.Message, 1)
 	fetchDone := make(chan error, 1)
 	go func() {
-		fetchDone <- client.Fetch(seqset, items, allMessages)
+		fetchDone <- client.UidFetch(seqset, items, messages)
 	}()
 
-	// Wait for fetch to complete or timeout
 	select {
 	case err := <-fetchDone:
 		if err != nil {
-			slog.Error("IMAP fetch failed", "error", err, "uids", uids, "seqset", seqset.String())
-			return nil, fmt.Errorf("failed to fetch messages: %w", err)
+			return nil, false, fmt.Errorf("failed to fetch message %d: %w", uid, err)
 		}
-	case <-ctx.Done():
-		slog.Error("IMAP fetch timed out", "timeout", imapFetchTimeout, "uids", uids)
-		return nil, fmt.Errorf("fetch operation timed out after %v: %w", imapFetchTimeout, ctx.Err())
+	case <-msgCtx.Done():
+		return nil, false, fmt.Errorf("fetch timeout for message %d: %w", uid, msgCtx.Err())
 	}
 
-	slog.Debug("Successfully fetched all messages, filtering and processing")
-
-	results := make([]MailSummary, 0, len(uids))
-	matchingUIDs := make([]uint32, 0, len(uids))
-	nonMatchingUIDs := make([]uint32, 0, len(uids))
-	processedCount := 0
-
-	// Process and filter messages simultaneously with timeout protection
-	for {
-		select {
-		case msg, ok := <-allMessages:
-			if !ok {
-				// Channel closed, we're done
-				goto processingComplete
-			}
-			processedCount++
-			slog.Debug("Processing message", "uid", msg.Uid, "processed_count", processedCount, "expected_total", len(uids))
-
-			// Check if this message matches our filter criteria
-			if !isFromAddressMatching(msg.Envelope, normalizedFilters) {
-				nonMatchingUIDs = append(nonMatchingUIDs, msg.Uid)
-				slog.Debug("Message does not match filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
-				continue
-			}
-
-			// Message matches - add to matching list and process
-			matchingUIDs = append(matchingUIDs, msg.Uid)
-			slog.Debug("Message matches filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
-
-			// Retrieve the raw message body from the fetched section
-			body := msg.GetBody(section)
-			if body == nil {
-				slog.Warn("No body found in matching message", "uid", msg.Uid)
-				continue
-			}
-
-			// Parse the MIME structure of the message using go-message
-			entity, err := message.Read(body)
-			if err != nil {
-				slog.Error("Failed to parse MIME message", "uid", msg.Uid, "error", err)
-				continue
-			}
-
-			// Extract plain text, HTML body, and attachments
-			text, html, attachments := extractBodies(entity)
-
-			// Add the parsed message data to the result list
-			results = append(results, MailSummary{
-				Envelope:    msg.Envelope,
-				UID:         msg.Uid,
-				TextBody:    text,
-				HTMLBody:    html,
-				Attachments: attachments,
-			})
-
-			slog.Debug("Successfully processed matching message", "uid", msg.Uid)
-		case <-ctx.Done():
-			slog.Error("Message processing timed out", "processed", processedCount, "expected", len(uids))
-			return nil, fmt.Errorf("message processing timed out: %w", ctx.Err())
-		}
+	// Get the message from channel
+	msg, ok := <-messages
+	if !ok || msg == nil {
+		return nil, false, fmt.Errorf("no message received for UID %d", uid)
 	}
 
-processingComplete:
-
-	// Log summary of matching vs non-matching messages
-	if viper.GetBool("verbose") {
-		logFilteringSummary(client, matchingUIDs, nonMatchingUIDs, normalizedFilters)
+	// Check if message matches filter
+	matches := isFromAddressMatching(msg.Envelope, filters)
+	if !matches {
+		slog.Debug("Message does not match filter", "uid", uid, "from", getFromAddress(msg.Envelope))
+		return nil, false, nil
 	}
 
-	slog.Debug("Message processing complete", "processed", processedCount, "expected", len(uids), "matching", len(matchingUIDs), "results", len(results))
-
-	// Validate that all expected messages were processed
-	if processedCount != len(uids) {
-		slog.Warn("Not all expected messages were processed",
-			"expected", len(uids),
-			"processed", processedCount,
-			"missing", len(uids)-processedCount)
+	// Process message body
+	body := msg.GetBody(section)
+	if body == nil {
+		return nil, true, fmt.Errorf("no body found for message %d", uid)
 	}
 
-	// No messages matched the criteria — return empty result
-	if len(results) == 0 {
-		slog.Info("No messages match the filter criteria", "unread_total", len(uids))
-		return nil, nil
+	entity, err := message.Read(body)
+	if err != nil {
+		return nil, true, fmt.Errorf("failed to parse message %d: %w", uid, err)
 	}
 
-	slog.Info("Found matching messages", "matching", len(results), "total_unread", len(uids))
+	text, html, attachments := extractBodies(entity)
 
-	return results, nil
+	mailSummary := &MailSummary{
+		Envelope:    msg.Envelope,
+		UID:         msg.Uid,
+		TextBody:    text,
+		HTMLBody:    html,
+		Attachments: attachments,
+	}
+
+	return mailSummary, true, nil
 }
 
 // logNonMatchingMessages logs details about non-matching messages for debugging
@@ -327,7 +372,7 @@ func logNonMatchingMessages(client *client.Client, nonMatchingUIDs []uint32) {
 	seqset.AddNum(nonMatchingUIDs...)
 
 	messages := make(chan *imap.Message, len(nonMatchingUIDs))
-	if err := client.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, messages); err != nil {
+	if err := client.UidFetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, messages); err != nil {
 		slog.Debug("Failed to fetch non-matching message envelopes", "error", err)
 		return
 	}
