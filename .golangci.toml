@@ -1,32 +1,32 @@
-version = 2
+version = "2"
 
 [issues]
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # no longer a problem in go 1.22
 linters = ["gosec"]
 text = "G601:"
 
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # safe to ignore
 linters = ["errcheck"]
 text = "viper.Bind"
 
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # not a magic number
 linters = ["mnd"]
 source = "cobra.MinimumNArgs"
 
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # idiomatic viper usage
 path = "cmd/.*\\.go"
 linters = ["gochecknoinits", "gochecknoglobals"]
 
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # errors are not consumed
 path = "cmd/.*\\.go"
 linters = ["err113", "goerr113", "wrapcheck"]
 
-[[issues.exclude-rules]]
+[[issues.exclude_rules]]
 # because I'm too lazy to fix it
 path = "internal/.*\\.go"
 linters = ["gosec", "varnamelen", "forbidigo", "godot"]
@@ -34,7 +34,7 @@ linters = ["gosec", "varnamelen", "forbidigo", "godot"]
 
 [linters]
 # enable all by default and remove those which we do not find useful
-enable-all = true
+enable_all = true
 disable = [
   "sqlclosecheck", # broken
   "musttag",       # broken
@@ -43,14 +43,14 @@ disable = [
   "ireturn"        # too restrictive
 ]
 
-[linters-settings.wsl]
+[linters_settings.wsl]
 allow-cuddle-declarations = true
 allow-trailing-comment = true
 
-[linters-settings.varnamelen]
+[linters_settings.varnamelen]
 ignore-names = ["rx", "tx", "db", "ok", "mw", "gw", "rt", "id", "mx"]
 ignore-decls = ["w http.ResponseWriter", "r *http.Request", "g *Gateway"]
 
-[linters-settings.tagliatelle.case.rules]
+[linters_settings.tagliatelle.case.rules]
 json = "snake"
 envconfig = "upperSnake"
