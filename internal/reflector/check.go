@@ -15,7 +15,9 @@ func CheckAndForward() error {
 	}
 
 	defer func() {
-		_ = client.Logout()
+		if err := client.Logout(); err != nil {
+			slog.Error("Failed to logout from IMAP", "error", err)
+		}
 	}()
 
 	if len(mails) == 0 {

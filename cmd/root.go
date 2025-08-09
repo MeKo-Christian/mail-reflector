@@ -20,14 +20,15 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Add persistent flag to enable verbose logging
 	rootCmd.PersistentFlags().Bool("verbose", false, "Enable verbose (info/debug) logging")
-	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	if err := viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose")); err != nil {
+		slog.Error("Failed to bind verbose flag", "error", err)
+	}
 
 	cobra.OnInitialize(initConfig)
 
 	// Register subcommands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(checkCmd)
-	rootCmd.AddCommand(initCmd)
 }
 
 func Execute() error {
