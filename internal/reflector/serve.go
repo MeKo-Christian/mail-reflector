@@ -24,7 +24,10 @@ func Serve(ctx context.Context) error {
 
 		// Check for existing unread messages before entering IDLE
 		slog.Info("Checking for existing unread messages")
-		_ = processMessages(imapClient, "initial check")
+		err = processMessages(imapClient, "initial check")
+		if err != nil {
+			slog.Error("Error processing messages", "context", "initial check", "error", err)
+		}
 
 		// Setup IDLE mode
 		idle := setupIDLE(imapClient)
