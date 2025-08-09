@@ -80,7 +80,7 @@ run-check: build
 # Run the application with serve command
 run-serve: build
     @echo "Running mail-reflector serve..."
-    ./mail-reflector serve
+    ./mail-reflector serve --verbose
 
 # Initialize configuration interactively
 init-config: build

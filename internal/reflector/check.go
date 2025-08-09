@@ -3,7 +3,7 @@ package reflector
 import (
 	"fmt"
 	"log/slog"
-	
+
 	"github.com/spf13/viper"
 )
 
