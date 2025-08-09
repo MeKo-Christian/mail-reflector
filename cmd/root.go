@@ -28,6 +28,7 @@ func init() {
 	// Register subcommands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(initCmd)
 }
 
