@@ -3,7 +3,6 @@ package reflector
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
 	"log/slog"
 	"strings"
 
@@ -136,48 +135,15 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 
 	slog.Debug("Found unread messages", "count", len(uids))
 
-	// Create a sequence set of UIDs to fetch envelopes first for filtering
+	// Fetch all unread messages with envelopes and bodies in one go
+	// This approach avoids UID invalidation issues between separate fetches
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(uids...)
 
-	// First, fetch just envelopes to filter by From address
-	envelopeMessages := make(chan *imap.Message, len(uids))
-	if err := client.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid}, envelopeMessages); err != nil {
-		return nil, fmt.Errorf("failed to fetch envelopes: %w", err)
-	}
+	slog.Debug("Fetching all unread messages with full data", "uids", uids, "count", len(uids))
 
-	// Filter messages by From address
-	matchingUIDs := make([]uint32, 0)
-	nonMatchingUIDs := make([]uint32, 0)
-
-	for msg := range envelopeMessages {
-		if isFromAddressMatching(msg.Envelope, normalizedFilters) {
-			matchingUIDs = append(matchingUIDs, msg.Uid)
-			slog.Debug("Message matches filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
-		} else {
-			nonMatchingUIDs = append(nonMatchingUIDs, msg.Uid)
-		}
-	}
-
-	// Log summary of matching vs non-matching messages
-	if viper.GetBool("verbose") {
-		logFilteringSummary(client, matchingUIDs, nonMatchingUIDs, normalizedFilters)
-	}
-
-	// No messages matched the criteria — return empty result
-	if len(matchingUIDs) == 0 {
-		slog.Info("No messages match the filter criteria", "unread_total", len(uids))
-		return nil, nil
-	}
-
-	slog.Info("Found matching messages", "matching", len(matchingUIDs), "total_unread", len(uids))
-
-	// Now fetch the full message data for matching messages
-	matchingSeqset := new(imap.SeqSet)
-	matchingSeqset.AddNum(matchingUIDs...)
-
-	// Prepare message channel to receive fetched messages
-	messages := make(chan *imap.Message, len(matchingUIDs))
+	// Prepare message channel to receive all fetched messages
+	allMessages := make(chan *imap.Message, len(uids))
 
 	// Define which parts of the message to fetch:
 	// - Envelope: contains subject, sender, recipient, date, etc.
@@ -190,26 +156,46 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 		section.FetchItem(),
 	}
 
-	// Fetch message data from server into the channel
-	if err := client.Fetch(matchingSeqset, items, messages); err != nil {
+	// Fetch all unread message data from server into the channel
+	if err := client.Fetch(seqset, items, allMessages); err != nil {
+		slog.Error("IMAP fetch failed", "error", err, "uids", uids, "seqset", seqset.String())
 		return nil, fmt.Errorf("failed to fetch messages: %w", err)
 	}
 
-	results := make([]MailSummary, 0, len(matchingUIDs))
+	slog.Debug("Successfully fetched all messages, filtering and processing")
 
-	// Process each fetched message
-	for msg := range messages {
+	results := make([]MailSummary, 0, len(uids))
+	matchingUIDs := make([]uint32, 0, len(uids))
+	nonMatchingUIDs := make([]uint32, 0, len(uids))
+	processedCount := 0
+
+	// Process and filter messages simultaneously
+	for msg := range allMessages {
+		processedCount++
+		slog.Debug("Processing message", "uid", msg.Uid, "processed_count", processedCount, "expected_total", len(uids))
+
+		// Check if this message matches our filter criteria
+		if !isFromAddressMatching(msg.Envelope, normalizedFilters) {
+			nonMatchingUIDs = append(nonMatchingUIDs, msg.Uid)
+			slog.Debug("Message does not match filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
+			continue
+		}
+
+		// Message matches - add to matching list and process
+		matchingUIDs = append(matchingUIDs, msg.Uid)
+		slog.Debug("Message matches filter", "uid", msg.Uid, "from", getFromAddress(msg.Envelope))
+
 		// Retrieve the raw message body from the fetched section
 		body := msg.GetBody(section)
 		if body == nil {
-			log.Println("No body found in message")
+			slog.Warn("No body found in matching message", "uid", msg.Uid)
 			continue
 		}
 
 		// Parse the MIME structure of the message using go-message
 		entity, err := message.Read(body)
 		if err != nil {
-			log.Printf("Failed to parse MIME message: %v", err)
+			slog.Error("Failed to parse MIME message", "uid", msg.Uid, "error", err)
 			continue
 		}
 
@@ -224,7 +210,32 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 			HTMLBody:    html,
 			Attachments: attachments,
 		})
+
+		slog.Debug("Successfully processed matching message", "uid", msg.Uid)
 	}
+
+	// Log summary of matching vs non-matching messages
+	if viper.GetBool("verbose") {
+		logFilteringSummary(client, matchingUIDs, nonMatchingUIDs, normalizedFilters)
+	}
+
+	slog.Debug("Message processing complete", "processed", processedCount, "expected", len(uids), "matching", len(matchingUIDs), "results", len(results))
+
+	// Validate that all expected messages were processed
+	if processedCount != len(uids) {
+		slog.Warn("Not all expected messages were processed",
+			"expected", len(uids),
+			"processed", processedCount,
+			"missing", len(uids)-processedCount)
+	}
+
+	// No messages matched the criteria — return empty result
+	if len(results) == 0 {
+		slog.Info("No messages match the filter criteria", "unread_total", len(uids))
+		return nil, nil
+	}
+
+	slog.Info("Found matching messages", "matching", len(results), "total_unread", len(uids))
 
 	return results, nil
 }
