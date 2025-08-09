@@ -3,21 +3,10 @@ package reflector
 import (
 	"context"
 	"log/slog"
-	"math"
 	"time"
 
-	idle "github.com/emersion/go-imap-idle"
 	"github.com/emersion/go-imap/client"
 	"github.com/spf13/viper"
-)
-
-const (
-	// maxRetryAttempts defines how many times to retry failed operations
-	maxRetryAttempts = 3
-	// baseRetryDelay is the base delay for exponential backoff
-	baseRetryDelay = 1 * time.Second
-	// maxRetryDelay caps the maximum retry delay
-	maxRetryDelay = 30 * time.Second
 )
 
 // Serve connects to the IMAP server and listens for new messages using the IDLE command.
@@ -26,100 +15,113 @@ func Serve(ctx context.Context) error {
 	connectionAttempt := 0
 
 	for {
+		// Check for cancellation at the start of each connection attempt
+		select {
+		case <-ctx.Done():
+			slog.Info("Serve operation cancelled")
+			return nil
+		default:
+		}
+
 		connectionAttempt++
 		slog.Info("Connecting to IMAP server", "attempt", connectionAttempt)
 
-		imapClient, err := connectAndLogin()
+		rawClient, err := connectAndLogin()
 		if err != nil {
 			slog.Error("Failed to connect", "error", err, "attempt", connectionAttempt)
 
 			// Use exponential backoff for connection retries
-			delay := time.Duration(math.Min(float64(connectionAttempt), 6)) * 10 * time.Second
+			attempts := connectionAttempt
+			if attempts > 6 {
+				attempts = 6
+			}
+			delay := time.Duration(attempts) * 10 * time.Second
 			if delay > 5*time.Minute {
 				delay = 5 * time.Minute
 			}
 
 			slog.Info("Retrying connection after delay", "delay", delay, "next_attempt", connectionAttempt+1)
-			select {
-			case <-time.After(delay):
-				continue
-			case <-ctx.Done():
-				return nil
-			}
+			time.Sleep(delay)
+			continue
 		}
+
+		// Create managed IMAP connection wrapper
+		imapConn := newImapConn(rawClient)
 
 		// Reset connection attempt counter on successful connection
 		connectionAttempt = 0
 
 		// Check for existing unread messages before entering IDLE
 		slog.Info("Checking for existing unread messages")
-		err = processMessages(imapClient, "initial check")
+		err = processMessagesWithConn(imapConn, "initial check")
 		if err != nil {
 			slog.Error("Error processing messages", "context", "initial check", "error", err)
 		}
 
-		// Setup IDLE mode
-		idle := setupIDLE(imapClient)
+		// Setup IDLE mode with proper updates channel (buffered to prevent deadlock)
+		updates := make(chan client.Update, 64) // buffer to allow IDLE goroutine to send final updates
+		imapConn.c.Updates = updates
 
-		select {
-		case <-ctx.Done():
-			shutdownIDLE(idle.stop, idle.done, imapClient)
-			return nil
-		case err := <-idle.done:
-			if err != nil {
-				slog.Error("IDLE terminated with error", "error", err)
-			}
-			close(idle.stop)
-			_ = imapClient.Logout()
+		// Start IDLE
+		err = imapConn.startIdle()
+		if err != nil {
+			slog.Error("Failed to start IDLE", "error", err)
+			_ = imapConn.close()
 			continue
-		case update := <-idle.updates:
-			if u, ok := update.(*client.MailboxUpdate); ok {
-				slog.Info("New mail detected", "exists", u.Mailbox.Messages, "recent", u.Mailbox.Recent)
-				_ = processMessages(imapClient, "new mail")
+		}
+
+		// Monitor for updates, cancellation, or errors
+		// Use a single-flight worker to serialize processing and keep updates reader responsive
+		work := make(chan struct{}, 1)
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("Serve operation cancelled, shutting down IDLE")
+				_ = imapConn.close()
+				return nil
+			case update := <-updates:
+				if u, ok := update.(*client.MailboxUpdate); ok {
+					slog.Info("New mail detected", "exists", u.Mailbox.Messages, "recent", u.Mailbox.Recent)
+
+					// Dispatch processing to background goroutine to keep updates reader responsive
+					select {
+					case work <- struct{}{}: // only process if not already processing
+						go func() {
+							defer func() { <-work }() // release work token when done
+
+							if err := processMessagesWithConn(imapConn, "new mail"); err != nil {
+								slog.Error("Error processing new messages", "error", err)
+							}
+
+							// Restart IDLE after processing messages
+							if err := imapConn.startIdle(); err != nil {
+								slog.Error("Failed to restart IDLE after processing", "error", err)
+								// Note: In goroutine, can't use goto reconnect directly
+								// The connection will be handled by the next update or timeout
+							}
+						}()
+					default:
+						// Already processing; skip this update to avoid overwhelming the system
+						slog.Debug("Skipping duplicate mail update - processing already in progress")
+					}
+				}
 			}
 		}
 	}
 }
 
-// idleSetup holds the channels and client needed for IDLE operations
-type idleSetup struct {
-	idleClient *idle.Client
-	updates    chan client.Update
-	done       chan error
-	stop       chan struct{}
-}
+// processMessagesWithConn fetches and forwards matching messages using imapConn wrapper
+func processMessagesWithConn(imapConn *imapConn, context string) error {
+	slog.Debug("Processing messages started", "context", context)
 
-// setupIDLE initializes IMAP IDLE mode and returns the necessary channels and clients
-func setupIDLE(imapClient *client.Client) *idleSetup {
-	slog.Info("Entering IDLE mode to listen for new messages")
+	var messages []MailSummary
+	var err error
 
-	idleClient := idle.NewClient(imapClient)
-	updates := make(chan client.Update)
-	imapClient.Updates = updates
-
-	done := make(chan error, 1)
-	stop := make(chan struct{})
-
-	go func() {
-		done <- idleClient.Idle(stop)
-	}()
-
-	return &idleSetup{
-		idleClient: idleClient,
-		updates:    updates,
-		done:       done,
-		stop:       stop,
-	}
-}
-
-// processMessages fetches and forwards matching messages, with context-aware logging and retry logic
-func processMessages(imapClient *client.Client, context string) error {
-	// Retry message fetching with exponential backoff
-	messages, err := retryOperation(func() ([]MailSummary, error) {
-		return FetchMatchingMailsWithClient(imapClient)
-	}, context+" fetch")
+	// Use the new wrapper-aware function that properly manages IDLE state
+	messages, err = FetchMatchingMailsWithConn(imapConn)
 	if err != nil {
-		slog.Error("Error fetching messages after retries", "context", context, "error", err)
+		slog.Error("Error fetching messages", "context", context, "error", err)
 		return err
 	}
 
@@ -136,79 +138,25 @@ func processMessages(imapClient *client.Client, context string) error {
 			slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject, "recipients", recipients, "recipient_count", len(recipients))
 		}
 
-		if err := ForwardMail(imapClient, msg); err != nil {
-			slog.Error("Error forwarding mail", "error", err)
-			continue
-		}
+		// Forward and mark as seen using withConn to manage IDLE state
+		err = imapConn.withConn(func(c *client.Client) error {
+			if err := ForwardMail(c, msg); err != nil {
+				slog.Error("Error forwarding mail", "error", err)
+				return err
+			}
 
-		if err := markAsSeen(imapClient, msg.UID); err != nil {
-			slog.Error("Error marking mail as seen", "error", err)
+			if err := markAsSeen(c, msg.UID); err != nil {
+				slog.Error("Error marking mail as seen", "error", err)
+				return err
+			}
+
+			return nil
+		})
+		if err != nil {
+			slog.Error("Error processing message", "uid", msg.UID, "error", err)
+			continue
 		}
 	}
 
 	return nil
-}
-
-// shutdownIDLE handles the graceful shutdown of IMAP IDLE mode with proper timeouts
-func shutdownIDLE(stop chan struct{}, done chan error, imapClient *client.Client) {
-	slog.Info("Shutting down IMAP IDLE loop")
-	close(stop)
-
-	// Wait for IDLE goroutine to finish with timeout
-	select {
-	case <-done:
-		slog.Debug("IDLE goroutine finished cleanly")
-	case <-time.After(5 * time.Second):
-		slog.Warn("IDLE goroutine did not finish within timeout, proceeding with logout")
-	}
-
-	// Logout with timeout to prevent hanging
-	logoutDone := make(chan struct{})
-	go func() {
-		_ = imapClient.Logout()
-		close(logoutDone)
-	}()
-
-	select {
-	case <-logoutDone:
-		slog.Debug("IMAP logout completed successfully")
-	case <-time.After(3 * time.Second):
-		slog.Warn("IMAP logout timed out, forcing exit")
-	}
-}
-
-// retryOperation performs an operation with exponential backoff retry logic
-func retryOperation(operation func() ([]MailSummary, error), context string) ([]MailSummary, error) {
-	var lastErr error
-
-	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		slog.Debug("Attempting operation", "context", context, "attempt", attempt, "max_attempts", maxRetryAttempts)
-
-		result, err := operation()
-		if err == nil {
-			if attempt > 1 {
-				slog.Info("Operation succeeded after retry", "context", context, "attempt", attempt)
-			}
-			return result, nil
-		}
-
-		lastErr = err
-		slog.Warn("Operation failed", "context", context, "attempt", attempt, "error", err)
-
-		// Don't retry on the last attempt
-		if attempt == maxRetryAttempts {
-			break
-		}
-
-		// Calculate exponential backoff delay
-		delay := time.Duration(math.Pow(2, float64(attempt-1))) * baseRetryDelay
-		if delay > maxRetryDelay {
-			delay = maxRetryDelay
-		}
-
-		slog.Debug("Retrying after delay", "context", context, "delay", delay, "next_attempt", attempt+1)
-		time.Sleep(delay)
-	}
-
-	return nil, lastErr
 }
