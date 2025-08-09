@@ -164,9 +164,9 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 
 	slog.Debug("Successfully fetched all messages, filtering and processing")
 
-	results := make([]MailSummary, 0)
-	matchingUIDs := make([]uint32, 0)
-	nonMatchingUIDs := make([]uint32, 0)
+	results := make([]MailSummary, 0, len(uids))
+	matchingUIDs := make([]uint32, 0, len(uids))
+	nonMatchingUIDs := make([]uint32, 0, len(uids))
 	processedCount := 0
 
 	// Process and filter messages simultaneously
@@ -219,7 +219,15 @@ func fetchMatchingMessages(client *client.Client) ([]MailSummary, error) {
 		logFilteringSummary(client, matchingUIDs, nonMatchingUIDs, normalizedFilters)
 	}
 
-	slog.Debug("Message processing complete", "processed", processedCount, "matching", len(matchingUIDs), "results", len(results))
+	slog.Debug("Message processing complete", "processed", processedCount, "expected", len(uids), "matching", len(matchingUIDs), "results", len(results))
+
+	// Validate that all expected messages were processed
+	if processedCount != len(uids) {
+		slog.Warn("Not all expected messages were processed",
+			"expected", len(uids),
+			"processed", processedCount,
+			"missing", len(uids)-processedCount)
+	}
 
 	// No messages matched the criteria — return empty result
 	if len(results) == 0 {
