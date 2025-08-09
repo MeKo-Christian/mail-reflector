@@ -3,24 +3,52 @@ package reflector
 import (
 	"context"
 	"log/slog"
+	"math"
 	"time"
 
 	idle "github.com/emersion/go-imap-idle"
 	"github.com/emersion/go-imap/client"
 )
 
+const (
+	// maxRetryAttempts defines how many times to retry failed operations
+	maxRetryAttempts = 3
+	// baseRetryDelay is the base delay for exponential backoff
+	baseRetryDelay = 1 * time.Second
+	// maxRetryDelay caps the maximum retry delay
+	maxRetryDelay = 30 * time.Second
+)
+
 // Serve connects to the IMAP server and listens for new messages using the IDLE command.
 // When a new message arrives, it triggers the same logic as the `check` command.
 func Serve(ctx context.Context) error {
+	connectionAttempt := 0
+
 	for {
-		slog.Info("Connecting to IMAP server")
+		connectionAttempt++
+		slog.Info("Connecting to IMAP server", "attempt", connectionAttempt)
 
 		imapClient, err := connectAndLogin()
 		if err != nil {
-			slog.Error("Failed to connect", "error", err)
-			time.Sleep(30 * time.Second)
-			continue
+			slog.Error("Failed to connect", "error", err, "attempt", connectionAttempt)
+
+			// Use exponential backoff for connection retries
+			delay := time.Duration(math.Min(float64(connectionAttempt), 6)) * 10 * time.Second
+			if delay > 5*time.Minute {
+				delay = 5 * time.Minute
+			}
+
+			slog.Info("Retrying connection after delay", "delay", delay, "next_attempt", connectionAttempt+1)
+			select {
+			case <-time.After(delay):
+				continue
+			case <-ctx.Done():
+				return nil
+			}
 		}
+
+		// Reset connection attempt counter on successful connection
+		connectionAttempt = 0
 
 		// Check for existing unread messages before entering IDLE
 		slog.Info("Checking for existing unread messages")
@@ -83,11 +111,14 @@ func setupIDLE(imapClient *client.Client) *idleSetup {
 	}
 }
 
-// processMessages fetches and forwards matching messages, with context-aware logging
+// processMessages fetches and forwards matching messages, with context-aware logging and retry logic
 func processMessages(imapClient *client.Client, context string) error {
-	messages, err := FetchMatchingMailsWithClient(imapClient)
+	// Retry message fetching with exponential backoff
+	messages, err := retryOperation(func() ([]MailSummary, error) {
+		return FetchMatchingMailsWithClient(imapClient)
+	}, context+" fetch")
 	if err != nil {
-		slog.Error("Error fetching messages", "context", context, "error", err)
+		slog.Error("Error fetching messages after retries", "context", context, "error", err)
 		return err
 	}
 
@@ -142,4 +173,40 @@ func shutdownIDLE(stop chan struct{}, done chan error, imapClient *client.Client
 	case <-time.After(3 * time.Second):
 		slog.Warn("IMAP logout timed out, forcing exit")
 	}
+}
+
+// retryOperation performs an operation with exponential backoff retry logic
+func retryOperation(operation func() ([]MailSummary, error), context string) ([]MailSummary, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		slog.Debug("Attempting operation", "context", context, "attempt", attempt, "max_attempts", maxRetryAttempts)
+
+		result, err := operation()
+		if err == nil {
+			if attempt > 1 {
+				slog.Info("Operation succeeded after retry", "context", context, "attempt", attempt)
+			}
+			return result, nil
+		}
+
+		lastErr = err
+		slog.Warn("Operation failed", "context", context, "attempt", attempt, "error", err)
+
+		// Don't retry on the last attempt
+		if attempt == maxRetryAttempts {
+			break
+		}
+
+		// Calculate exponential backoff delay
+		delay := time.Duration(math.Pow(2, float64(attempt-1))) * baseRetryDelay
+		if delay > maxRetryDelay {
+			delay = maxRetryDelay
+		}
+
+		slog.Debug("Retrying after delay", "context", context, "delay", delay, "next_attempt", attempt+1)
+		time.Sleep(delay)
+	}
+
+	return nil, lastErr
 }
