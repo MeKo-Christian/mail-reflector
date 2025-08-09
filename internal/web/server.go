@@ -27,7 +27,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
 	// Static files
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/web/static"))))
+	staticFiles, err := fs.Sub(embeddedStaticFiles, "static")
+	if err != nil {
+		return fmt.Errorf("failed to create static file system: %w", err)
+	}
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
 
 	// Public routes
 	mux.HandleFunc("/login", s.handleLogin)
