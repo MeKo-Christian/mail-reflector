@@ -24,84 +24,122 @@ func Serve(ctx context.Context) error {
 
 		// Check for existing unread messages before entering IDLE
 		slog.Info("Checking for existing unread messages")
-		messages, err := FetchMatchingMailsWithClient(imapClient)
+		err = processMessages(imapClient, "initial check")
 		if err != nil {
-			slog.Error("Error fetching existing messages", "error", err)
-		} else {
-			for _, msg := range messages {
-				err := ForwardMail(imapClient, msg)
-				if err != nil {
-					slog.Error("Error forwarding mail", "error", err)
-					continue
-				}
-				err = markAsSeen(imapClient, msg.UID)
-				if err != nil {
-					slog.Error("Error marking mail as seen", "error", err)
-				}
-			}
+			slog.Error("Error processing messages", "context", "initial check", "error", err)
 		}
 
-		// Enter IDLE mode
-		slog.Info("Entering IDLE mode to listen for new messages")
-		idleClient := idle.NewClient(imapClient)
-		updates := make(chan client.Update)
-		imapClient.Updates = updates
-
-		done := make(chan error, 1)
-		stop := make(chan struct{})
-
-		go func() {
-			done <- idleClient.Idle(stop)
-		}()
+		// Setup IDLE mode
+		idle := setupIDLE(imapClient)
 
 		select {
 		case <-ctx.Done():
-			slog.Info("Shutting down IMAP IDLE loop")
-			close(stop)
-
-			// Wait for IDLE goroutine to finish with timeout
-			select {
-			case <-done:
-				slog.Debug("IDLE goroutine finished cleanly")
-			case <-time.After(5 * time.Second):
-				slog.Warn("IDLE goroutine did not finish within timeout, proceeding with logout")
-			}
-
-			_ = imapClient.Logout()
+			shutdownIDLE(idle.stop, idle.done, imapClient)
 			return nil
-		case err := <-done:
+		case err := <-idle.done:
 			if err != nil {
 				slog.Error("IDLE terminated with error", "error", err)
 			}
-			close(stop)
+			close(idle.stop)
 			_ = imapClient.Logout()
 			continue
-		case update := <-updates:
-			switch u := update.(type) {
-			case *client.MailboxUpdate:
+		case update := <-idle.updates:
+			if u, ok := update.(*client.MailboxUpdate); ok {
 				slog.Info("New mail detected", "exists", u.Mailbox.Messages, "recent", u.Mailbox.Recent)
-
-				messages, err := FetchMatchingMailsWithClient(imapClient)
-				if err != nil {
-					slog.Error("Error fetching new messages", "error", err)
-					break
-				}
-
-				if len(messages) > 0 {
-					slog.Info("Found matching messages to forward", "count", len(messages))
-					for _, msg := range messages {
-						slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject)
-						err := ForwardMail(imapClient, msg)
-						if err != nil {
-							slog.Error("Error forwarding mail", "error", err)
-							continue
-						}
-						_ = markAsSeen(imapClient, msg.UID)
-					}
-				} else {
-					slog.Info("No matching messages found to forward")
-				}
+				_ = processMessages(imapClient, "new mail")
 			}
 		}
+	}
+}
+
+// idleSetup holds the channels and client needed for IDLE operations
+type idleSetup struct {
+	idleClient *idle.Client
+	updates    chan client.Update
+	done       chan error
+	stop       chan struct{}
+}
+
+// setupIDLE initializes IMAP IDLE mode and returns the necessary channels and clients
+func setupIDLE(imapClient *client.Client) *idleSetup {
+	slog.Info("Entering IDLE mode to listen for new messages")
+
+	idleClient := idle.NewClient(imapClient)
+	updates := make(chan client.Update)
+	imapClient.Updates = updates
+
+	done := make(chan error, 1)
+	stop := make(chan struct{})
+
+	go func() {
+		done <- idleClient.Idle(stop)
+	}()
+
+	return &idleSetup{
+		idleClient: idleClient,
+		updates:    updates,
+		done:       done,
+		stop:       stop,
+	}
+}
+
+// processMessages fetches and forwards matching messages, with context-aware logging
+func processMessages(imapClient *client.Client, context string) error {
+	messages, err := FetchMatchingMailsWithClient(imapClient)
+	if err != nil {
+		slog.Error("Error fetching messages", "context", context, "error", err)
+		return err
+	}
+
+	if len(messages) == 0 {
+		slog.Info("No matching messages found", "context", context)
+		return nil
+	}
+
+	slog.Info("Found matching messages to forward", "context", context, "count", len(messages))
+
+	for _, msg := range messages {
+		if len(msg.Envelope.From) > 0 {
+			slog.Info("Forwarding message", "from", msg.Envelope.From[0].Address(), "subject", msg.Envelope.Subject)
+		}
+
+		if err := ForwardMail(imapClient, msg); err != nil {
+			slog.Error("Error forwarding mail", "error", err)
+			continue
+		}
+
+		if err := markAsSeen(imapClient, msg.UID); err != nil {
+			slog.Error("Error marking mail as seen", "error", err)
+		}
+	}
+
+	return nil
+}
+
+// shutdownIDLE handles the graceful shutdown of IMAP IDLE mode with proper timeouts
+func shutdownIDLE(stop chan struct{}, done chan error, imapClient *client.Client) {
+	slog.Info("Shutting down IMAP IDLE loop")
+	close(stop)
+
+	// Wait for IDLE goroutine to finish with timeout
+	select {
+	case <-done:
+		slog.Debug("IDLE goroutine finished cleanly")
+	case <-time.After(5 * time.Second):
+		slog.Warn("IDLE goroutine did not finish within timeout, proceeding with logout")
+	}
+
+	// Logout with timeout to prevent hanging
+	logoutDone := make(chan struct{})
+	go func() {
+		_ = imapClient.Logout()
+		close(logoutDone)
+	}()
+
+	select {
+	case <-logoutDone:
+		slog.Debug("IMAP logout completed successfully")
+	case <-time.After(3 * time.Second):
+		slog.Warn("IMAP logout timed out, forcing exit")
 	}
 }

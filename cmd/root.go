@@ -3,6 +3,7 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -27,6 +28,7 @@ func init() {
 	// Register subcommands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -48,6 +50,38 @@ func initConfig() {
 		} else {
 			slog.Error("Failed to read config", "error", err)
 		}
+	} else {
+		// Validate config after successful load
+		validateConfig()
+	}
+}
+
+func validateConfig() {
+	// Validate filter.from addresses
+	filterFroms := viper.GetStringSlice("filter.from")
+	if len(filterFroms) > 0 {
+		hasUppercase := false
+		for _, email := range filterFroms {
+			if email != strings.ToLower(email) {
+				hasUppercase = true
+				break
+			}
+		}
+		if hasUppercase {
+			slog.Warn("Filter email addresses contain uppercase letters",
+				"configured_emails", filterFroms,
+				"hint", "Email matching is case-insensitive, consider using lowercase for consistency")
+		}
+	}
+
+	// Check for other potential config issues
+	if len(filterFroms) == 0 {
+		slog.Warn("No filter.from addresses configured - no emails will be processed")
+	}
+
+	recipients := viper.GetStringSlice("recipients")
+	if len(recipients) == 0 {
+		slog.Warn("No recipients configured - forwarding will not work")
 	}
 }
 
