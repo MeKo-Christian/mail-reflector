@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/emersion/go-imap"
@@ -288,13 +289,7 @@ func isFromAddressMatching(envelope *imap.Envelope, normalizedFilters []string) 
 
 	fromAddress := strings.ToLower(envelope.From[0].Address())
 
-	for _, filter := range normalizedFilters {
-		if fromAddress == filter {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(normalizedFilters, fromAddress)
 }
 
 // getFromAddress safely extracts the From address from an envelope
